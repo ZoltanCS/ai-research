@@ -1,5 +1,8 @@
-"""Chat API endpoints with streaming support."""
+"""Chat API — streaming, non-streaming, and conversation persistence."""
 
+from __future__ import annotations
+
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -9,154 +12,271 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.config import settings
 from core.database import get_db
 from models.database import Conversation, Message
 from models.schemas import (
     ChatRequest,
+    ChatMessage,
+    CompleteChatRequest,
     ConversationDetailOut,
     ConversationOut,
     MessageOut,
+    SaveConversationRequest,
+    SSEDone,
+    SSEToken,
+    StreamChatRequest,
 )
-from services.llm import stream_llm
+from services.ai_provider import Provider, stream_chat
 from services.rag import build_rag_prompt, retrieve_context
 from services.search import format_search_context, web_search
 
 router = APIRouter()
 
-SYSTEM_PROMPT = (
+DEFAULT_SYSTEM_PROMPT = (
     "You are LocalMind, a helpful AI research assistant. "
     "Answer concisely and accurately. When referencing sources, cite them."
 )
 
 
-async def _build_messages(
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _get_or_create_conversation(
     db: AsyncSession,
-    conversation_id: uuid.UUID,
-    user_message: str,
+    conversation_id: uuid.UUID | None,
+    first_user_message: str,
+) -> Conversation:
+    if conversation_id:
+        result = await db.execute(
+            select(Conversation).where(Conversation.id == conversation_id)
+        )
+        conv = result.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return conv
+
+    title = first_user_message[:60] + ("…" if len(first_user_message) > 60 else "")
+    conv = Conversation(id=uuid.uuid4(), title=title)
+    db.add(conv)
+    await db.flush()
+    return conv
+
+
+async def _augment_last_user_message(
+    db: AsyncSession,
+    messages: list[ChatMessage],
     use_rag: bool,
     use_web_search: bool,
 ) -> list[dict]:
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    """Convert schema messages to dicts and optionally augment the last user turn."""
+    raw: list[dict] = [m.model_dump() for m in messages]
 
-    # Load conversation history
+    # Find the last user message to augment
+    last_user_idx = next(
+        (i for i in reversed(range(len(raw))) if raw[i]["role"] == "user"),
+        None,
+    )
+    if last_user_idx is None:
+        return raw
+
+    original_text = raw[last_user_idx]["content"]
+
+    if use_rag:
+        chunks = await retrieve_context(db, original_text)
+        if chunks:
+            raw[last_user_idx]["content"] = build_rag_prompt(original_text, chunks)
+
+    if use_web_search:
+        try:
+            search_resp = await web_search(original_text)
+            context = format_search_context(search_resp)
+            raw[last_user_idx]["content"] = (
+                f"Web search results:\n{context}\n\nUser question: {original_text}"
+            )
+        except ValueError:
+            pass  # Tavily not configured — silently skip
+
+    return raw
+
+
+async def _load_history(db: AsyncSession, conversation_id: uuid.UUID) -> list[dict]:
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at)
-        .limit(20)
+        .limit(40)
     )
-    for msg in result.scalars():
-        messages.append({"role": msg.role, "content": msg.content})
-
-    # Augment user message with context
-    augmented = user_message
-
-    if use_rag:
-        chunks = await retrieve_context(db, user_message)
-        if chunks:
-            augmented = build_rag_prompt(user_message, chunks)
-
-    if use_web_search:
-        try:
-            search_resp = await web_search(user_message)
-            context = format_search_context(search_resp)
-            augmented = (
-                f"Web search results:\n{context}\n\nUser question: {user_message}"
-            )
-        except ValueError:
-            pass  # Tavily not configured, skip
-
-    messages.append({"role": "user", "content": augmented})
-    return messages
+    return [{"role": m.role, "content": m.content} for m in result.scalars()]
 
 
-@router.post("")
-async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
-    # Get or create conversation
-    if request.conversation_id:
-        result = await db.execute(
-            select(Conversation).where(Conversation.id == request.conversation_id)
-        )
-        conversation = result.scalar_one_or_none()
-        if not conversation:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-    else:
-        conversation = Conversation(
+def _sse(data: str) -> str:
+    """Wrap a string as an SSE data line."""
+    return f"data: {data}\n\n"
+
+
+# ── POST /api/chat/stream ─────────────────────────────────────────────────────
+
+@router.post("/stream")
+async def stream_chat_endpoint(
+    request: StreamChatRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream tokens via Server-Sent Events.
+
+    Each event is a JSON-encoded line:
+
+        data: {"delta": "<token>"}
+
+    The final event signals completion:
+
+        data: {"done": true, "conversation_id": "<uuid>"}
+    """
+    last_user = next(
+        (m.content for m in reversed(request.messages) if m.role == "user"),
+        "",
+    )
+    conv = await _get_or_create_conversation(db, request.conversation_id, last_user)
+
+    # Persist user turn
+    db.add(
+        Message(
             id=uuid.uuid4(),
-            title=request.message[:60] + ("…" if len(request.message) > 60 else ""),
+            conversation_id=conv.id,
+            role="user",
+            content=last_user,
         )
-        db.add(conversation)
-        await db.flush()
-
-    # Save user message
-    user_msg = Message(
-        id=uuid.uuid4(),
-        conversation_id=conversation.id,
-        role="user",
-        content=request.message,
     )
-    db.add(user_msg)
     await db.commit()
 
-    messages = await _build_messages(
-        db,
-        conversation.id,
-        request.message,
-        request.use_rag,
-        request.use_web_search,
+    # Build full message list: history + augmented new messages
+    history = await _load_history(db, conv.id)
+    raw_messages = await _augment_last_user_message(
+        db, request.messages, request.use_rag, request.use_web_search
     )
 
-    if request.stream:
-        async def token_stream() -> AsyncGenerator[str, None]:
-            full_response = []
-            async for token in stream_llm(messages):
-                full_response.append(token)
-                yield f"data: {token}\n\n"
+    resolved_system = request.system_prompt or DEFAULT_SYSTEM_PROMPT
+    provider = Provider(request.provider)
+    model = request.model
 
-            # Persist assistant response after stream completes
-            assistant_content = "".join(full_response)
+    async def token_generator() -> AsyncGenerator[str, None]:
+        collected: list[str] = []
+        try:
+            async for token in stream_chat(
+                raw_messages,
+                model=model,
+                provider=provider,
+                system_prompt=resolved_system,
+            ):
+                collected.append(token)
+                yield _sse(SSEToken(delta=token).model_dump_json())
+
+            assistant_content = "".join(collected)
             async with db.begin():
                 db.add(
                     Message(
                         id=uuid.uuid4(),
-                        conversation_id=conversation.id,
+                        conversation_id=conv.id,
                         role="assistant",
                         content=assistant_content,
                     )
                 )
-            yield "data: [DONE]\n\n"
+        except Exception as exc:
+            # Surface errors to the client via SSE before closing
+            yield _sse(json.dumps({"error": str(exc)}))
+        finally:
+            yield _sse(SSEDone(conversation_id=str(conv.id)).model_dump_json())
 
-        return StreamingResponse(
-            token_stream(),
-            media_type="text/event-stream",
-            headers={
-                "X-Conversation-Id": str(conversation.id),
-                "Cache-Control": "no-cache",
-            },
+    return StreamingResponse(
+        token_generator(),
+        media_type="text/event-stream",
+        headers={
+            "X-Conversation-Id": str(conv.id),
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
+
+
+# ── POST /api/chat/complete ───────────────────────────────────────────────────
+
+@router.post("/complete", response_model=MessageOut)
+async def complete_chat_endpoint(
+    request: CompleteChatRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Non-streaming chat: waits for the full response before returning."""
+    last_user = next(
+        (m.content for m in reversed(request.messages) if m.role == "user"),
+        "",
+    )
+    conv = await _get_or_create_conversation(db, request.conversation_id, last_user)
+
+    db.add(
+        Message(
+            id=uuid.uuid4(),
+            conversation_id=conv.id,
+            role="user",
+            content=last_user,
         )
+    )
+    await db.commit()
 
-    # Non-streaming fallback
-    tokens = []
-    async for token in stream_llm(messages):
+    raw_messages = await _augment_last_user_message(
+        db, request.messages, request.use_rag, request.use_web_search
+    )
+    resolved_system = request.system_prompt or DEFAULT_SYSTEM_PROMPT
+
+    tokens: list[str] = []
+    async for token in stream_chat(
+        raw_messages,
+        model=request.model,
+        provider=request.provider,
+        system_prompt=resolved_system,
+    ):
         tokens.append(token)
 
     assistant_content = "".join(tokens)
     assistant_msg = Message(
         id=uuid.uuid4(),
-        conversation_id=conversation.id,
+        conversation_id=conv.id,
         role="assistant",
         content=assistant_content,
     )
     db.add(assistant_msg)
     await db.commit()
+    await db.refresh(assistant_msg)
 
-    return MessageOut(
-        id=assistant_msg.id,
-        role="assistant",
-        content=assistant_content,
-        created_at=assistant_msg.created_at,
+    return MessageOut.model_validate(assistant_msg)
+
+
+# ── Legacy POST /api/chat (backward-compat) ───────────────────────────────────
+
+@router.post("")
+async def chat_legacy(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+    """Backward-compatible single-message endpoint.
+
+    Wraps the legacy ChatRequest into StreamChatRequest and delegates to
+    stream_chat_endpoint or complete_chat_endpoint.
+    """
+    wrapped = StreamChatRequest(
+        messages=[ChatMessage(role="user", content=request.message)],
+        model=settings.ollama_model
+        if settings.llm_provider == "ollama"
+        else (settings.openai_model if settings.llm_provider == "openai" else settings.anthropic_model),
+        provider=settings.llm_provider,
+        conversation_id=request.conversation_id,
+        use_rag=request.use_rag,
+        use_web_search=request.use_web_search,
     )
 
+    if request.stream:
+        return await stream_chat_endpoint(wrapped, db)
+    return await complete_chat_endpoint(
+        CompleteChatRequest(**wrapped.model_dump()), db
+    )
+
+
+# ── GET /api/conversations ────────────────────────────────────────────────────
 
 @router.get("/conversations", response_model=list[ConversationOut])
 async def list_conversations(
@@ -175,7 +295,6 @@ async def list_conversations(
         .limit(limit)
         .offset(offset)
     )
-    rows = result.all()
     return [
         ConversationOut(
             id=row.Conversation.id,
@@ -184,9 +303,43 @@ async def list_conversations(
             updated_at=row.Conversation.updated_at,
             message_count=row.message_count,
         )
-        for row in rows
+        for row in result.all()
     ]
 
+
+# ── POST /api/conversations ───────────────────────────────────────────────────
+
+@router.post("/conversations", response_model=ConversationDetailOut, status_code=201)
+async def save_conversation(
+    request: SaveConversationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a full conversation (e.g. imported from another session)."""
+    conv = Conversation(id=uuid.uuid4(), title=request.title)
+    db.add(conv)
+    await db.flush()
+
+    for msg in request.messages:
+        db.add(
+            Message(
+                id=uuid.uuid4(),
+                conversation_id=conv.id,
+                role=msg.role,
+                content=msg.content,
+            )
+        )
+
+    await db.commit()
+
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conv.id)
+        .options(selectinload(Conversation.messages))
+    )
+    return result.scalar_one()
+
+
+# ── GET /api/conversations/{id} ───────────────────────────────────────────────
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetailOut)
 async def get_conversation(
@@ -198,11 +351,13 @@ async def get_conversation(
         .where(Conversation.id == conversation_id)
         .options(selectinload(Conversation.messages))
     )
-    conversation = result.scalar_one_or_none()
-    if not conversation:
+    conv = result.scalar_one_or_none()
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return conversation
+    return conv
 
+
+# ── DELETE /api/conversations/{id} ───────────────────────────────────────────
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(
@@ -212,8 +367,8 @@ async def delete_conversation(
     result = await db.execute(
         select(Conversation).where(Conversation.id == conversation_id)
     )
-    conversation = result.scalar_one_or_none()
-    if not conversation:
+    conv = result.scalar_one_or_none()
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    await db.delete(conversation)
+    await db.delete(conv)
     await db.commit()
