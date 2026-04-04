@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -59,6 +59,9 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Populated by document_service; nullable so old rows stay valid
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -78,7 +81,23 @@ class DocumentChunk(Base):
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Vector dimension matches settings.embedding_dimensions (default 768).
+    # tsvector for keyword search is computed inline via to_tsvector() rather
+    # than stored, to avoid requiring a schema migration.
     embedding: Mapped[list[float]] = mapped_column(Vector(768), nullable=True)
 
     document: Mapped["Document"] = relationship("Document", back_populates="chunks")
+
+    __table_args__ = (
+        # IVFFlat index for approximate nearest-neighbour search.
+        # lists=100 is a reasonable default for up to ~1M vectors.
+        Index(
+            "ix_document_chunks_embedding",
+            "embedding",
+            postgresql_using="ivfflat",
+            postgresql_with={"lists": 100},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )

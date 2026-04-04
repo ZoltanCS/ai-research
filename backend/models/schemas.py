@@ -99,6 +99,7 @@ class DocumentOut(BaseModel):
     filename: str
     content_type: str
     chunk_count: int
+    file_size: int | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -107,10 +108,77 @@ class DocumentOut(BaseModel):
 class DocumentChunkOut(BaseModel):
     id: uuid.UUID
     chunk_index: int
+    token_count: int | None = None
     content: str
     score: float | None = None
 
     model_config = {"from_attributes": True}
+
+
+# ── RAG ───────────────────────────────────────────────────────────────────────
+
+class RAGQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000)
+    top_k: int = Field(default=6, ge=1, le=20)
+    # Alpha controls semantic vs keyword weighting: 1.0 = pure semantic
+    hybrid_alpha: float = Field(default=0.7, ge=0.0, le=1.0)
+    # Optionally filter to specific documents
+    document_ids: list[uuid.UUID] | None = None
+    # When True, also return the assembled prompt-ready context string
+    include_context: bool = False
+
+
+class RetrievedChunkOut(BaseModel):
+    """A single chunk returned by the retrieval pipeline."""
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    filename: str
+    chunk_index: int
+    content: str
+    semantic_score: float
+    keyword_score: float
+    combined_score: float
+
+    model_config = {"from_attributes": True}
+
+
+class RAGQueryResponse(BaseModel):
+    query: str
+    chunks: list[RetrievedChunkOut]
+    # Only present when include_context=True
+    context: str | None = None
+    # Metadata
+    semantic_search_ms: float | None = None
+    keyword_search_ms: float | None = None
+    total_ms: float | None = None
+
+
+# ── Web search ────────────────────────────────────────────────────────────────
+
+class WebSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    max_results: int = Field(default=5, ge=1, le=20)
+    include_content: bool = Field(
+        default=False,
+        description="Scrape full page content for each result",
+    )
+
+
+class WebSearchResultOut(BaseModel):
+    title: str
+    url: str
+    snippet: str
+    content: str | None = None   # full scraped content, if include_content=True
+    score: float | None = None
+    provider: str             # "tavily" | "searxng"
+
+
+class WebSearchResponse(BaseModel):
+    query: str
+    results: list[WebSearchResultOut]
+    answer: str | None = None  # AI-generated answer from Tavily
+    cached: bool = False
+    provider: str             # which backend was used
 
 
 # ── Models / providers ────────────────────────────────────────────────────────
@@ -141,7 +209,7 @@ class ProvidersStatusResponse(BaseModel):
     anthropic: ProviderStatusOut
 
 
-# ── Research ──────────────────────────────────────────────────────────────────
+# ── Research (legacy) ─────────────────────────────────────────────────────────
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)

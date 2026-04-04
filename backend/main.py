@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import engine
 from models.database import Base
-from routers import chat, documents, models, research
+from routers import chat, documents, models, rag, research, search
 
 
 @asynccontextmanager
@@ -35,6 +35,8 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
+app.include_router(search.router, prefix="/api/search", tags=["search"])
 app.include_router(research.router, prefix="/api/research", tags=["research"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 
