@@ -209,6 +209,36 @@ class ProvidersStatusResponse(BaseModel):
     anthropic: ProviderStatusOut
 
 
+# ── Research (deep agent) ─────────────────────────────────────────────────────
+
+class ResearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=1000)
+    model: str = Field(..., min_length=1)
+    provider: str = Field(default="ollama", pattern="^(ollama|openai|anthropic)$")
+    max_sub_questions: int = Field(default=4, ge=1, le=8)
+    max_results_per_query: int = Field(default=5, ge=1, le=10)
+    top_k_sources: int = Field(default=6, ge=1, le=20)
+
+
+class ResearchSourceOut(BaseModel):
+    title: str
+    url: str
+    query: str
+
+
+class ResearchReportOut(BaseModel):
+    id: uuid.UUID
+    query: str
+    sub_questions: list[str]
+    sources: list[ResearchSourceOut]
+    report: str
+    model: str
+    provider: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Research (legacy) ─────────────────────────────────────────────────────────
 
 class SearchRequest(BaseModel):

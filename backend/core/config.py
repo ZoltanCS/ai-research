@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     web_scrape_max_chars: int = 3000   # max chars to keep from scraped page
     web_cache_ttl: int = 3600          # Redis TTL for search results (seconds)
 
+    # ── Deep Research agent ───────────────────────────────────────────────────
+    research_max_sub_questions: int = 4   # default decomposition breadth
+    research_max_results_per_query: int = 5
+    research_top_k_sources: int = 6       # sources fed to synthesis LLM
+
     # ── CORS ──────────────────────────────────────────────────────────────────
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 

@@ -287,6 +287,19 @@ async def stream_chat(
         yield token
 
 
+async def complete_chat(
+    messages: list[dict],
+    model: str,
+    provider: Provider | str,
+    system_prompt: str | None = None,
+) -> str:
+    """Non-streaming variant: collect all tokens and return the full response."""
+    tokens: list[str] = []
+    async for token in stream_chat(messages, model, provider, system_prompt):
+        tokens.append(token)
+    return "".join(tokens)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _prepend_system(
