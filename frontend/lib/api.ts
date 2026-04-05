@@ -100,6 +100,15 @@ export async function getProviderStatus(): Promise<
 
 // ── Chat (new streaming endpoint) ─────────────────────────────────────────────
 
+export interface ToolCallEvent {
+  type: "web_search";
+  query: string;
+}
+
+export interface ToolResultEvent {
+  count: number;
+}
+
 export async function streamChatMessage(params: {
   messages: Array<{ role: string; content: string }>;
   model: string;
@@ -111,6 +120,8 @@ export async function streamChatMessage(params: {
   onToken: (token: string) => void;
   onDone: (conversationId: string | null) => void;
   onError: (error: string) => void;
+  onToolCall?: (tool: ToolCallEvent) => void;
+  onToolResult?: (result: ToolResultEvent) => void;
   signal?: AbortSignal;
 }): Promise<void> {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -163,6 +174,10 @@ export async function streamChatMessage(params: {
           } else if (typeof event.error === "string") {
             params.onError(event.error);
             return;
+          } else if (event.tool_call === "web_search" && typeof event.query === "string") {
+            params.onToolCall?.({ type: "web_search", query: event.query });
+          } else if (event.tool_result === true) {
+            params.onToolResult?.({ count: event.count as number });
           }
         } catch {
           // malformed JSON line — skip

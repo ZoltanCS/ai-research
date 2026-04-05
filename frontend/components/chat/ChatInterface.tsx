@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Brain, Sparkles } from "lucide-react";
+import { Brain, Globe, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useStore, type LocalMessage } from "@/store";
 import { streamChatMessage, getConversation } from "@/lib/api";
@@ -62,6 +62,8 @@ export function ChatInterface() {
     setIsStreaming,
     clearChat,
   } = useStore();
+
+  const [activeSearch, setActiveSearch] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -142,13 +144,21 @@ export function ChatInterface() {
           useWebSearch,
           onToken: appendToLastMessage,
           onDone: (newId) => {
+            setActiveSearch(null);
             finalizeLastMessage();
             if (newId) setConversationId(newId);
           },
           onError: (err) => {
+            setActiveSearch(null);
             appendToLastMessage(`\n\n⚠️ Error: ${err}`);
             finalizeLastMessage();
             toast.error(err);
+          },
+          onToolCall: (tool) => {
+            if (tool.type === "web_search") setActiveSearch(tool.query);
+          },
+          onToolResult: () => {
+            setActiveSearch(null);
           },
           signal: abortRef.current.signal,
         });
@@ -182,6 +192,7 @@ export function ChatInterface() {
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
+    setActiveSearch(null);
     finalizeLastMessage();
   }, [finalizeLastMessage]);
 
@@ -205,6 +216,14 @@ export function ChatInterface() {
           </div>
         )}
       </div>
+
+      {/* Active web search indicator */}
+      {activeSearch && (
+        <div className="flex items-center gap-2 text-xs text-zinc-500 px-4 py-1">
+          <Globe size={12} className="animate-spin" />
+          Searching: {activeSearch}
+        </div>
+      )}
 
       {/* Input area */}
       <InputArea onSubmit={handleSubmit} onStop={handleStop} />

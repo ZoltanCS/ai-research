@@ -27,7 +27,7 @@ from models.schemas import (
     SSEToken,
     StreamChatRequest,
 )
-from services.ai_provider import Provider, ProviderCredentials, stream_chat
+from services.ai_provider import Provider, ProviderCredentials, stream_chat, stream_chat_with_tools
 from services.rag import build_rag_prompt, retrieve_context
 from services.search import format_search_context, web_search
 
@@ -176,15 +176,19 @@ async def stream_chat_endpoint(
     async def token_generator() -> AsyncGenerator[str, None]:
         collected: list[str] = []
         try:
-            async for token in stream_chat(
+            async for item in stream_chat_with_tools(
                 raw_messages,
                 model=model,
                 provider=provider,
                 system_prompt=resolved_system,
                 creds=creds,
+                enable_web_search=request.use_web_search,
             ):
-                collected.append(token)
-                yield _sse(SSEToken(delta=token).model_dump_json())
+                if isinstance(item, dict):
+                    yield _sse(json.dumps(item))
+                else:
+                    collected.append(item)
+                    yield _sse(SSEToken(delta=item).model_dump_json())
 
             assistant_content = "".join(collected)
             db.add(

@@ -500,6 +500,42 @@ async def _stream_vercel(
             yield chunk.choices[0].delta.content
 
 
+# ── Tool definitions ──────────────────────────────────────────────────────────
+
+WEB_SEARCH_TOOL_OPENAI = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "Search the web for current information. Use this when you need up-to-date facts, news, or information you're not certain about.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+WEB_SEARCH_TOOL_ANTHROPIC = {
+    "name": "web_search",
+    "description": "Search the web for current information. Use this when you need up-to-date facts, news, or information you're not certain about.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query",
+            }
+        },
+        "required": ["query"],
+    },
+}
+
+
 # ── Public interface ──────────────────────────────────────────────────────────
 
 async def stream_chat(
@@ -545,6 +581,209 @@ async def stream_chat(
 
     async for token in gen:
         yield token
+
+
+async def stream_chat_with_tools(
+    messages: list[dict],
+    model: str,
+    provider: Provider | str,
+    system_prompt: str | None = None,
+    creds: ProviderCredentials | None = None,
+    enable_web_search: bool = False,
+) -> AsyncGenerator[str | dict, None]:
+    """Stream tokens, optionally with LLM-driven web search tool calling.
+
+    Yields:
+      - ``dict`` for tool events: ``{"tool_call": "web_search", "query": "..."}``
+        and ``{"tool_result": True, "count": N}``
+      - ``str`` for text tokens
+
+    When ``enable_web_search=False`` (or provider is Ollama), delegates directly
+    to ``stream_chat``.
+    """
+    if creds is None:
+        creds = ProviderCredentials()
+
+    p = Provider(provider)
+
+    # Ollama doesn't reliably support tool calling — fall back to plain streaming
+    if not enable_web_search or p == Provider.OLLAMA:
+        async for token in stream_chat(messages, model, p, system_prompt, creds):
+            yield token
+        return
+
+    if p == Provider.ANTHROPIC:
+        async for item in _stream_with_tools_anthropic(
+            messages, model, system_prompt, creds
+        ):
+            yield item
+        return
+
+    # OpenAI-compatible providers: OpenAI, Cerebras, Vercel
+    if p == Provider.OPENAI:
+        client = openai.AsyncOpenAI(api_key=creds.get_openai())
+    elif p == Provider.CEREBRAS:
+        client = openai.AsyncOpenAI(
+            api_key=creds.get_cerebras(),
+            base_url="https://api.cerebras.ai/v1",
+        )
+    elif p == Provider.VERCEL:
+        client = openai.AsyncOpenAI(
+            api_key=creds.get_vercel(),
+            base_url=creds.get_gateway_url(),
+        )
+    else:
+        # Unexpected — fall back
+        async for token in stream_chat(messages, model, p, system_prompt, creds):
+            yield token
+        return
+
+    full_messages = _prepend_system(messages, system_prompt)
+
+    # First call — non-streaming to detect tool use
+    response = await client.chat.completions.create(
+        model=model,
+        messages=full_messages,  # type: ignore[arg-type]
+        tools=[WEB_SEARCH_TOOL_OPENAI],  # type: ignore[arg-type]
+        tool_choice="auto",
+        max_tokens=4096,
+    )
+    choice = response.choices[0]
+
+    if choice.finish_reason == "tool_calls":
+        tool_calls = choice.message.tool_calls or []
+
+        # Reconstruct assistant message with tool_calls for the history
+        messages_with_tools: list[dict] = list(full_messages) + [
+            {
+                "role": "assistant",
+                "content": choice.message.content,
+                "tool_calls": [tc.model_dump() for tc in tool_calls],
+            }
+        ]
+
+        for tc in tool_calls:
+            if tc.function.name == "web_search":
+                args = json.loads(tc.function.arguments)
+                query = args["query"]
+                yield {"tool_call": "web_search", "query": query}
+
+                try:
+                    from services.web_search import search as web_search_fn
+                    result = await web_search_fn(query, max_results=5, include_content=False)
+                    results_text = "\n\n".join(
+                        f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
+                        for i, r in enumerate(result.results[:5])
+                    )
+                    yield {"tool_result": True, "count": len(result.results)}
+                except Exception as exc:
+                    results_text = f"Search failed: {exc}"
+                    yield {"tool_result": True, "count": 0}
+
+                messages_with_tools.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": results_text,
+                    }
+                )
+
+        # Second call — stream the final answer
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages_with_tools,  # type: ignore[arg-type]
+            max_tokens=4096,
+            stream=True,
+        )
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    else:
+        # No tool call — yield existing content as tokens
+        content = choice.message.content or ""
+        for char in content:
+            yield char
+
+
+async def _stream_with_tools_anthropic(
+    messages: list[dict],
+    model: str,
+    system_prompt: str | None,
+    creds: ProviderCredentials,
+) -> AsyncGenerator[str | dict, None]:
+    """Tool-calling loop for Anthropic provider."""
+    chat_messages = [m for m in messages if m["role"] != "system"]
+    embedded = next(
+        (m["content"] for m in messages if m["role"] == "system"), None
+    )
+    resolved_system = system_prompt or embedded
+
+    client = anthropic.AsyncAnthropic(api_key=creds.get_anthropic())
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": 4096,
+        "messages": chat_messages,
+        "tools": [WEB_SEARCH_TOOL_ANTHROPIC],
+    }
+    if resolved_system:
+        kwargs["system"] = resolved_system
+
+    response = await client.messages.create(**kwargs)
+
+    # Check for tool use blocks
+    tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+
+    if response.stop_reason == "tool_use" and tool_use_blocks:
+        # Build updated message history with the assistant's tool_use turn
+        updated_messages = list(chat_messages) + [
+            {"role": "assistant", "content": response.content}
+        ]
+
+        tool_results = []
+        for block in tool_use_blocks:
+            if block.name == "web_search":
+                query = block.input.get("query", "")
+                yield {"tool_call": "web_search", "query": query}
+
+                try:
+                    from services.web_search import search as web_search_fn
+                    result = await web_search_fn(query, max_results=5, include_content=False)
+                    results_text = "\n\n".join(
+                        f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
+                        for i, r in enumerate(result.results[:5])
+                    )
+                    yield {"tool_result": True, "count": len(result.results)}
+                except Exception as exc:
+                    results_text = f"Search failed: {exc}"
+                    yield {"tool_result": True, "count": 0}
+
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": results_text,
+                    }
+                )
+
+        updated_messages.append({"role": "user", "content": tool_results})
+
+        # Stream the final response
+        final_kwargs: dict = {
+            "model": model,
+            "max_tokens": 4096,
+            "messages": updated_messages,
+        }
+        if resolved_system:
+            final_kwargs["system"] = resolved_system
+
+        async with client.messages.stream(**final_kwargs) as stream:
+            async for text in stream.text_stream:
+                yield text
+    else:
+        # No tool use — yield text content from the response
+        for block in response.content:
+            if hasattr(block, "text"):
+                yield block.text
 
 
 async def complete_chat(
