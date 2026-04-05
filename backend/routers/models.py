@@ -1,21 +1,34 @@
 """Model listing and provider health-check endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from models.schemas import AllModelsResponse, ModelInfoOut, ProvidersStatusResponse, ProviderStatusOut
-from services.ai_provider import Provider, get_provider_status, list_all_models
+from services.ai_provider import Provider, ProviderCredentials, get_provider_status, list_all_models
 
 router = APIRouter()
 
 
+def _creds(req: Request) -> ProviderCredentials:
+    """Extract provider credentials from custom request headers."""
+    return ProviderCredentials(
+        openai_key=req.headers.get("X-OpenAI-Key", ""),
+        anthropic_key=req.headers.get("X-Anthropic-Key", ""),
+        cerebras_key=req.headers.get("X-Cerebras-Key", ""),
+        vercel_token=req.headers.get("X-Vercel-Token", ""),
+        vercel_gateway_url=req.headers.get("X-Vercel-Gateway", ""),
+        ollama_host=req.headers.get("X-Ollama-Host", ""),
+    )
+
+
 @router.get("/models", response_model=AllModelsResponse)
-async def get_all_models():
+async def get_all_models(request: Request):
     """Return available models grouped by provider.
 
-    Ollama models are fetched live from the daemon; cloud provider lists
-    are static but reflect the models actually usable with LocalMind.
+    Ollama models are fetched live from the daemon; cloud provider lists are
+    fetched live when an API key header is present, otherwise fall back to
+    static defaults.
     """
-    all_models = await list_all_models()
+    all_models = await list_all_models(_creds(request))
 
     def _convert(models):
         return [
@@ -38,16 +51,16 @@ async def get_all_models():
 
 
 @router.get("/providers/status", response_model=ProvidersStatusResponse)
-async def get_providers_status():
-    """Check connectivity / configuration for all three providers.
+async def get_providers_status(request: Request):
+    """Check connectivity / configuration for all providers.
 
     Status values:
     - ``ok``           — provider is reachable and the API key is valid
     - ``error``        — provider is reachable but authentication failed or
                          an unexpected error occurred
-    - ``unconfigured`` — required API key env var is not set
+    - ``unconfigured`` — required API key is not set (env or header)
     """
-    statuses = await get_provider_status()
+    statuses = await get_provider_status(_creds(request))
 
     def _to_schema(raw: dict) -> ProviderStatusOut:
         return ProviderStatusOut(

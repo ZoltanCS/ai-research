@@ -1,4 +1,20 @@
+import { useStore } from "@/store";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Read provider credentials from the Zustand store and return them as HTTP headers. */
+function credHeaders(): Record<string, string> {
+  const s = useStore.getState();
+  const k = s.providerKeys;
+  const h: Record<string, string> = {};
+  if (k.openai) h["X-OpenAI-Key"] = k.openai;
+  if (k.anthropic) h["X-Anthropic-Key"] = k.anthropic;
+  if (k.cerebras) h["X-Cerebras-Key"] = k.cerebras;
+  if (k.vercel) h["X-Vercel-Token"] = k.vercel;
+  if (k.vercelGateway) h["X-Vercel-Gateway"] = k.vercelGateway;
+  if (s.ollamaHost) h["X-Ollama-Host"] = s.ollamaHost;
+  return h;
+}
 
 // ── Base types ────────────────────────────────────────────────────────────────
 
@@ -68,7 +84,7 @@ export interface ProviderStatus {
 }
 
 export async function getModels(): Promise<AllModels> {
-  const res = await fetch(`${API_BASE}/api/models`);
+  const res = await fetch(`${API_BASE}/api/models`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch models");
   return res.json();
 }
@@ -76,7 +92,7 @@ export async function getModels(): Promise<AllModels> {
 export async function getProviderStatus(): Promise<
   Record<string, ProviderStatus>
 > {
-  const res = await fetch(`${API_BASE}/api/providers/status`);
+  const res = await fetch(`${API_BASE}/api/providers/status`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch provider status");
   return res.json();
 }
@@ -98,7 +114,7 @@ export async function streamChatMessage(params: {
 }): Promise<void> {
   const response = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...credHeaders() },
     body: JSON.stringify({
       messages: params.messages,
       model: params.model,
@@ -167,7 +183,7 @@ export async function sendMessage(params: {
 }) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...credHeaders() },
     body: JSON.stringify({
       message: params.message,
       conversation_id: params.conversationId ?? null,
@@ -208,13 +224,13 @@ export async function sendMessage(params: {
 // ── Conversations ─────────────────────────────────────────────────────────────
 
 export async function getConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${API_BASE}/api/chat/conversations`);
+  const res = await fetch(`${API_BASE}/api/chat/conversations`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch conversations");
   return res.json();
 }
 
 export async function getConversation(id: string): Promise<ConversationDetail> {
-  const res = await fetch(`${API_BASE}/api/chat/conversations/${id}`);
+  const res = await fetch(`${API_BASE}/api/chat/conversations/${id}`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch conversation");
   return res.json();
 }
@@ -222,6 +238,7 @@ export async function getConversation(id: string): Promise<ConversationDetail> {
 export async function deleteConversation(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/chat/conversations/${id}`, {
     method: "DELETE",
+    headers: credHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete conversation");
 }
@@ -268,12 +285,14 @@ export function uploadDocumentWithProgress(
     };
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.open("POST", `${API_BASE}/api/documents`);
+    const ch = credHeaders();
+    Object.entries(ch).forEach(([k, v]) => xhr.setRequestHeader(k, v));
     xhr.send(formData);
   });
 }
 
 export async function getDocuments(): Promise<Document[]> {
-  const res = await fetch(`${API_BASE}/api/documents`);
+  const res = await fetch(`${API_BASE}/api/documents`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch documents");
   return res.json();
 }
@@ -281,6 +300,7 @@ export async function getDocuments(): Promise<Document[]> {
 export async function deleteDocument(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/documents/${id}`, {
     method: "DELETE",
+    headers: credHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete document");
 }
@@ -322,7 +342,7 @@ export async function startResearch(params: {
 }): Promise<void> {
   const response = await fetch(`${API_BASE}/api/research/start`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...credHeaders() },
     body: JSON.stringify({
       query: params.query,
       model: params.model,
@@ -364,13 +384,13 @@ export async function startResearch(params: {
 }
 
 export async function getResearchReports(): Promise<ResearchReport[]> {
-  const res = await fetch(`${API_BASE}/api/research/reports`);
+  const res = await fetch(`${API_BASE}/api/research/reports`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch research reports");
   return res.json();
 }
 
 export async function getResearchReport(id: string): Promise<ResearchReport> {
-  const res = await fetch(`${API_BASE}/api/research/reports/${id}`);
+  const res = await fetch(`${API_BASE}/api/research/reports/${id}`, { headers: credHeaders() });
   if (!res.ok) throw new Error("Failed to fetch research report");
   return res.json();
 }
@@ -381,7 +401,7 @@ export async function webSearch(
 ): Promise<SearchResponse> {
   const res = await fetch(`${API_BASE}/api/research/search`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...credHeaders() },
     body: JSON.stringify({ query, max_results: maxResults, include_answer: true }),
   });
   if (!res.ok) {

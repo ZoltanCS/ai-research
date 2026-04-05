@@ -5,6 +5,13 @@ import { persist } from "zustand/middleware";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export type ProviderKey =
+  | "ollama"
+  | "openai"
+  | "anthropic"
+  | "cerebras"
+  | "vercel";
+
 export interface LocalMessage {
   id: string;
   role: "user" | "assistant";
@@ -16,18 +23,27 @@ export interface LocalMessage {
 interface PersistedSettings {
   // Model selection
   selectedModel: string;
-  selectedProvider: "ollama" | "openai" | "anthropic" | "cerebras" | "vercel";
+  selectedProvider: ProviderKey;
   // Chat defaults
   useRag: boolean;
   useWebSearch: boolean;
   systemPrompt: string;
   // Appearance
   theme: "dark" | "light";
-  // Provider overrides (local override of env; backend still needs .env for actual auth)
+  // Provider credentials (stored in browser, sent as headers to backend)
+  providerKeys: {
+    openai: string;
+    anthropic: string;
+    cerebras: string;
+    vercel: string;
+    vercelGateway: string;
+  };
   ollamaHost: string;
+  // Custom model IDs per provider (user-managed additions)
+  customModels: Record<string, string[]>;
   // Per-task model defaults
   defaultResearchModel: string;
-  defaultResearchProvider: "ollama" | "openai" | "anthropic" | "cerebras" | "vercel";
+  defaultResearchProvider: ProviderKey;
 }
 
 interface StoreState extends PersistedSettings {
@@ -46,6 +62,12 @@ interface StoreState extends PersistedSettings {
   setModel: (model: string, provider: string) => void;
   setSettings: (s: Partial<PersistedSettings>) => void;
   toggleTheme: () => void;
+  setProviderKey: (
+    field: keyof PersistedSettings["providerKeys"],
+    value: string
+  ) => void;
+  addCustomModel: (provider: string, modelId: string) => void;
+  removeCustomModel: (provider: string, modelId: string) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -60,7 +82,21 @@ export const useStore = create<StoreState>()(
       useWebSearch: false,
       systemPrompt: "",
       theme: "dark",
+      providerKeys: {
+        openai: "",
+        anthropic: "",
+        cerebras: "",
+        vercel: "",
+        vercelGateway: "",
+      },
       ollamaHost: "",
+      customModels: {
+        ollama: [],
+        openai: [],
+        anthropic: [],
+        cerebras: [],
+        vercel: [],
+      },
       defaultResearchModel: "",
       defaultResearchProvider: "ollama",
 
@@ -106,13 +142,40 @@ export const useStore = create<StoreState>()(
       setModel: (model, provider) =>
         set({
           selectedModel: model,
-          selectedProvider: provider as PersistedSettings["selectedProvider"],
+          selectedProvider: provider as ProviderKey,
         }),
 
       setSettings: (s) => set(s),
 
       toggleTheme: () =>
         set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
+
+      setProviderKey: (field, value) =>
+        set((state) => ({
+          providerKeys: { ...state.providerKeys, [field]: value },
+        })),
+
+      addCustomModel: (provider, modelId) =>
+        set((state) => {
+          const current = state.customModels[provider] ?? [];
+          if (current.includes(modelId)) return state;
+          return {
+            customModels: {
+              ...state.customModels,
+              [provider]: [...current, modelId],
+            },
+          };
+        }),
+
+      removeCustomModel: (provider, modelId) =>
+        set((state) => ({
+          customModels: {
+            ...state.customModels,
+            [provider]: (state.customModels[provider] ?? []).filter(
+              (m) => m !== modelId
+            ),
+          },
+        })),
     }),
     {
       name: "localmind-store",
@@ -123,7 +186,9 @@ export const useStore = create<StoreState>()(
         useWebSearch: state.useWebSearch,
         systemPrompt: state.systemPrompt,
         theme: state.theme,
+        providerKeys: state.providerKeys,
         ollamaHost: state.ollamaHost,
+        customModels: state.customModels,
         defaultResearchModel: state.defaultResearchModel,
         defaultResearchProvider: state.defaultResearchProvider,
       }),

@@ -6,7 +6,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,11 +27,24 @@ from models.schemas import (
     SSEToken,
     StreamChatRequest,
 )
-from services.ai_provider import Provider, stream_chat
+from services.ai_provider import Provider, ProviderCredentials, stream_chat
 from services.rag import build_rag_prompt, retrieve_context
 from services.search import format_search_context, web_search
 
 router = APIRouter()
+
+
+def _creds(req: Request) -> ProviderCredentials:
+    """Extract provider credentials from custom request headers."""
+    return ProviderCredentials(
+        openai_key=req.headers.get("X-OpenAI-Key", ""),
+        anthropic_key=req.headers.get("X-Anthropic-Key", ""),
+        cerebras_key=req.headers.get("X-Cerebras-Key", ""),
+        vercel_token=req.headers.get("X-Vercel-Token", ""),
+        vercel_gateway_url=req.headers.get("X-Vercel-Gateway", ""),
+        ollama_host=req.headers.get("X-Ollama-Host", ""),
+    )
+
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are LocalMind, a helpful AI research assistant. "
@@ -119,6 +132,7 @@ def _sse(data: str) -> str:
 @router.post("/stream")
 async def stream_chat_endpoint(
     request: StreamChatRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Stream tokens via Server-Sent Events.
@@ -157,6 +171,7 @@ async def stream_chat_endpoint(
     resolved_system = request.system_prompt or DEFAULT_SYSTEM_PROMPT
     provider = Provider(request.provider)
     model = request.model
+    creds = _creds(http_request)
 
     async def token_generator() -> AsyncGenerator[str, None]:
         collected: list[str] = []
@@ -166,6 +181,7 @@ async def stream_chat_endpoint(
                 model=model,
                 provider=provider,
                 system_prompt=resolved_system,
+                creds=creds,
             ):
                 collected.append(token)
                 yield _sse(SSEToken(delta=token).model_dump_json())
@@ -202,6 +218,7 @@ async def stream_chat_endpoint(
 @router.post("/complete", response_model=MessageOut)
 async def complete_chat_endpoint(
     request: CompleteChatRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Non-streaming chat: waits for the full response before returning."""
@@ -232,6 +249,7 @@ async def complete_chat_endpoint(
         model=request.model,
         provider=request.provider,
         system_prompt=resolved_system,
+        creds=_creds(http_request),
     ):
         tokens.append(token)
 
@@ -252,7 +270,7 @@ async def complete_chat_endpoint(
 # ── Legacy POST /api/chat (backward-compat) ───────────────────────────────────
 
 @router.post("")
-async def chat_legacy(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat_legacy(request: ChatRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     """Backward-compatible single-message endpoint.
 
     Wraps the legacy ChatRequest into StreamChatRequest and delegates to
@@ -270,9 +288,9 @@ async def chat_legacy(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     )
 
     if request.stream:
-        return await stream_chat_endpoint(wrapped, db)
+        return await stream_chat_endpoint(wrapped, http_request, db)
     return await complete_chat_endpoint(
-        CompleteChatRequest(**wrapped.model_dump()), db
+        CompleteChatRequest(**wrapped.model_dump()), http_request, db
     )
 
 

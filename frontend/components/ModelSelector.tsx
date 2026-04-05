@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Server, Zap, Brain, Cpu, Globe, Check } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useStore } from "@/store";
-import { getModels, getProviderStatus, type AllModels, type ProviderStatus } from "@/lib/api";
+import { getModels, getProviderStatus, type AllModels, type ModelInfo, type ProviderStatus } from "@/lib/api";
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ function StatusDot({ status }: { status?: string }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ModelSelector() {
-  const { selectedModel, selectedProvider, setModel } = useStore();
+  const { selectedModel, selectedProvider, setModel, customModels } = useStore();
 
   const [models, setModels] = useState<AllModels>({
     ollama: [],
@@ -81,7 +81,12 @@ export default function ModelSelector() {
           {PROVIDERS.map((provider, i) => {
             const { label, Icon } = PROVIDER_META[provider];
             const status = statuses[provider];
-            const providerModels = models[provider] ?? [];
+            const fetched = models[provider] ?? [];
+            const fetchedIds = new Set(fetched.map((m) => m.id));
+            const extra = (customModels[provider] ?? [])
+              .filter((id) => !fetchedIds.has(id))
+              .map((id): ModelInfo => ({ id, name: id, provider, context_length: undefined }));
+            const providerModels = [...fetched, ...extra];
             const isLast = i === PROVIDERS.length - 1;
 
             return (

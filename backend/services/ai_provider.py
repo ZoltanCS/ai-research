@@ -2,8 +2,8 @@
 
 Supports five providers via a single stream_chat interface:
   - ollama    (local, fetches available models dynamically)
-  - openai    (cloud, static model list)
-  - anthropic (cloud, static model list)
+  - openai    (cloud, fetches live model list when key is present)
+  - anthropic (cloud, fetches live model list when key is present)
   - cerebras  (cloud, fast inference, OpenAI-compatible)
   - vercel    (AI Gateway proxy, OpenAI-compatible)
 
@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal
 
@@ -42,6 +42,37 @@ class Provider(StrEnum):
     VERCEL = "vercel"
 
 
+# ── Runtime credential overrides ──────────────────────────────────────────────
+
+@dataclass
+class ProviderCredentials:
+    """Runtime credential overrides sourced from request headers."""
+    openai_key: str = ""
+    anthropic_key: str = ""
+    cerebras_key: str = ""
+    vercel_token: str = ""
+    vercel_gateway_url: str = ""
+    ollama_host: str = ""
+
+    def get_openai(self) -> str:
+        return self.openai_key or settings.openai_api_key
+
+    def get_anthropic(self) -> str:
+        return self.anthropic_key or settings.anthropic_api_key
+
+    def get_cerebras(self) -> str:
+        return self.cerebras_key or settings.cerebras_api_key
+
+    def get_vercel(self) -> str:
+        return self.vercel_token or settings.vercel_api_token
+
+    def get_gateway_url(self) -> str:
+        return self.vercel_gateway_url or settings.vercel_gateway_url
+
+    def get_ollama(self) -> str:
+        return self.ollama_host or settings.ollama_host
+
+
 # ── Model catalogue ───────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -51,7 +82,7 @@ class ModelInfo:
     provider: Provider
     context_length: int | None = None
 
-# Static lists for cloud providers
+# Static lists for cloud providers (used as fallbacks when no key is present)
 _OPENAI_MODELS: list[ModelInfo] = [
     ModelInfo("gpt-4o",       "GPT-4o",       Provider.OPENAI, 128_000),
     ModelInfo("gpt-4o-mini",  "GPT-4o Mini",  Provider.OPENAI, 128_000),
@@ -87,62 +118,117 @@ _VERCEL_MODELS: list[ModelInfo] = [
 
 # ── Model listing ─────────────────────────────────────────────────────────────
 
-async def _list_ollama_models() -> list[ModelInfo]:
+async def _list_ollama_models(creds: ProviderCredentials) -> list[ModelInfo]:
     """Fetch installed models from the local Ollama daemon."""
+    host = creds.get_ollama()
     try:
-        async with httpx.AsyncClient(
-            base_url=settings.ollama_host, timeout=5
-        ) as client:
+        async with httpx.AsyncClient(base_url=host, timeout=5) as client:
             response = await client.get("/api/tags")
             response.raise_for_status()
             data = response.json()
             return [
-                ModelInfo(
-                    id=m["name"],
-                    name=m["name"],
-                    provider=Provider.OLLAMA,
-                    context_length=None,
-                )
+                ModelInfo(id=m["name"], name=m["name"], provider=Provider.OLLAMA)
                 for m in data.get("models", [])
             ]
     except Exception as exc:
-        log.warning("Could not reach Ollama at %s: %s", settings.ollama_host, exc)
+        log.warning("Could not reach Ollama at %s: %s", host, exc)
         return []
 
 
-async def list_models(provider: Provider | str) -> list[ModelInfo]:
+async def _list_openai_models(creds: ProviderCredentials) -> list[ModelInfo]:
+    """Fetch live model list from OpenAI; fall back to static list when no key."""
+    key = creds.get_openai()
+    if not key:
+        return _OPENAI_MODELS
+    try:
+        client = openai.AsyncOpenAI(api_key=key)
+        resp = await client.models.list()
+        CHAT_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt")
+        models = [
+            m for m in resp.data
+            if any(m.id.startswith(p) for p in CHAT_PREFIXES)
+            and "realtime" not in m.id
+            and "audio" not in m.id
+        ]
+        models.sort(key=lambda m: m.id, reverse=True)
+        result = [ModelInfo(id=m.id, name=m.id, provider=Provider.OPENAI) for m in models]
+        return result or _OPENAI_MODELS
+    except Exception as exc:
+        log.warning("Could not fetch OpenAI models: %s", exc)
+        return _OPENAI_MODELS
+
+
+async def _list_anthropic_models(creds: ProviderCredentials) -> list[ModelInfo]:
+    """Fetch live model list from Anthropic; fall back to static list when no key."""
+    key = creds.get_anthropic()
+    if not key:
+        return _ANTHROPIC_MODELS
+    try:
+        client = anthropic.AsyncAnthropic(api_key=key)
+        resp = await client.models.list()
+        result = [
+            ModelInfo(
+                id=m.id,
+                name=getattr(m, "display_name", m.id),
+                provider=Provider.ANTHROPIC,
+                context_length=getattr(m, "context_window", None),
+            )
+            for m in resp.data
+        ]
+        return result or _ANTHROPIC_MODELS
+    except Exception as exc:
+        log.warning("Could not fetch Anthropic models: %s", exc)
+        return _ANTHROPIC_MODELS
+
+
+async def _list_cerebras_models(creds: ProviderCredentials) -> list[ModelInfo]:
+    """Fetch live model list from Cerebras; fall back to static list when no key."""
+    key = creds.get_cerebras()
+    if not key:
+        return _CEREBRAS_MODELS
+    try:
+        client = openai.AsyncOpenAI(api_key=key, base_url="https://api.cerebras.ai/v1")
+        resp = await client.models.list()
+        result = [ModelInfo(id=m.id, name=m.id, provider=Provider.CEREBRAS) for m in resp.data]
+        return result or _CEREBRAS_MODELS
+    except Exception as exc:
+        log.warning("Could not fetch Cerebras models: %s", exc)
+        return _CEREBRAS_MODELS
+
+
+async def list_models(
+    provider: Provider | str,
+    creds: ProviderCredentials | None = None,
+) -> list[ModelInfo]:
     """Return available models for the given provider."""
+    if creds is None:
+        creds = ProviderCredentials()
     match Provider(provider):
         case Provider.OPENAI:
-            return _OPENAI_MODELS
+            return await _list_openai_models(creds)
         case Provider.ANTHROPIC:
-            return _ANTHROPIC_MODELS
+            return await _list_anthropic_models(creds)
         case Provider.CEREBRAS:
-            return _CEREBRAS_MODELS
+            return await _list_cerebras_models(creds)
         case Provider.VERCEL:
             return _VERCEL_MODELS
         case Provider.OLLAMA:
-            return await _list_ollama_models()
+            return await _list_ollama_models(creds)
 
 
-async def _static(value):
-    """Trivial coroutine that immediately returns a static value."""
-    return value
+async def list_all_models(
+    creds: ProviderCredentials | None = None,
+) -> dict[str, list[ModelInfo]]:
+    """Return models for all providers concurrently."""
+    if creds is None:
+        creds = ProviderCredentials()
 
-
-async def list_all_models() -> dict[str, list[ModelInfo]]:
-    """Return models for all providers concurrently.
-
-    Ollama is fetched live; all other lists are static but gathered in the
-    same call so the caller always gets a uniform dict.
-    """
-    ollama_models, openai_models, anthropic_models, cerebras_models, vercel_models = (
+    ollama_models, openai_models, anthropic_models, cerebras_models = (
         await asyncio.gather(
-            _list_ollama_models(),
-            _static(_OPENAI_MODELS),
-            _static(_ANTHROPIC_MODELS),
-            _static(_CEREBRAS_MODELS),
-            _static(_VERCEL_MODELS),
+            _list_ollama_models(creds),
+            _list_openai_models(creds),
+            _list_anthropic_models(creds),
+            _list_cerebras_models(creds),
         )
     )
     return {
@@ -150,30 +236,30 @@ async def list_all_models() -> dict[str, list[ModelInfo]]:
         Provider.OPENAI: openai_models,
         Provider.ANTHROPIC: anthropic_models,
         Provider.CEREBRAS: cerebras_models,
-        Provider.VERCEL: vercel_models,
+        Provider.VERCEL: _VERCEL_MODELS,
     }
 
 
 # ── Provider health checks ────────────────────────────────────────────────────
 
-async def _check_ollama() -> dict:
+async def _check_ollama(creds: ProviderCredentials) -> dict:
+    host = creds.get_ollama()
     try:
-        async with httpx.AsyncClient(
-            base_url=settings.ollama_host, timeout=3
-        ) as client:
+        async with httpx.AsyncClient(base_url=host, timeout=3) as client:
             r = await client.get("/api/tags")
             r.raise_for_status()
             model_count = len(r.json().get("models", []))
-            return {"status": "ok", "model_count": model_count, "host": settings.ollama_host}
+            return {"status": "ok", "model_count": model_count, "host": host}
     except Exception as exc:
-        return {"status": "error", "detail": str(exc), "host": settings.ollama_host}
+        return {"status": "error", "detail": str(exc), "host": host}
 
 
-async def _check_openai() -> dict:
-    if not settings.openai_api_key:
-        return {"status": "unconfigured", "detail": "OPENAI_API_KEY not set"}
+async def _check_openai(creds: ProviderCredentials) -> dict:
+    key = creds.get_openai()
+    if not key:
+        return {"status": "unconfigured", "detail": "No OpenAI API key set"}
     try:
-        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        client = openai.AsyncOpenAI(api_key=key)
         await client.models.list()
         return {"status": "ok"}
     except openai.AuthenticationError:
@@ -182,11 +268,12 @@ async def _check_openai() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def _check_anthropic() -> dict:
-    if not settings.anthropic_api_key:
-        return {"status": "unconfigured", "detail": "ANTHROPIC_API_KEY not set"}
+async def _check_anthropic(creds: ProviderCredentials) -> dict:
+    key = creds.get_anthropic()
+    if not key:
+        return {"status": "unconfigured", "detail": "No Anthropic API key set"}
     try:
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.AsyncAnthropic(api_key=key)
         await client.models.list()
         return {"status": "ok"}
     except anthropic.AuthenticationError:
@@ -195,12 +282,13 @@ async def _check_anthropic() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def _check_cerebras() -> dict:
-    if not settings.cerebras_api_key:
-        return {"status": "unconfigured", "detail": "CEREBRAS_API_KEY not set"}
+async def _check_cerebras(creds: ProviderCredentials) -> dict:
+    key = creds.get_cerebras()
+    if not key:
+        return {"status": "unconfigured", "detail": "No Cerebras API key set"}
     try:
         client = openai.AsyncOpenAI(
-            api_key=settings.cerebras_api_key,
+            api_key=key,
             base_url="https://api.cerebras.ai/v1",
         )
         await client.models.list()
@@ -211,17 +299,19 @@ async def _check_cerebras() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def _check_vercel() -> dict:
-    if not settings.vercel_api_token:
-        return {"status": "unconfigured", "detail": "VERCEL_API_TOKEN not set"}
+async def _check_vercel(creds: ProviderCredentials) -> dict:
+    token = creds.get_vercel()
+    gateway_url = creds.get_gateway_url()
+    if not token:
+        return {"status": "unconfigured", "detail": "No Vercel API token set"}
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             r = await client.get(
-                f"{settings.vercel_gateway_url.rstrip('/')}/models",
-                headers={"Authorization": f"Bearer {settings.vercel_api_token}"},
+                f"{gateway_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {token}"},
             )
             r.raise_for_status()
-        return {"status": "ok", "host": settings.vercel_gateway_url}
+        return {"status": "ok", "host": gateway_url}
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             return {"status": "error", "detail": "Invalid Vercel API token"}
@@ -230,15 +320,19 @@ async def _check_vercel() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
-async def get_provider_status() -> dict[str, dict]:
+async def get_provider_status(
+    creds: ProviderCredentials | None = None,
+) -> dict[str, dict]:
     """Run health checks for all providers concurrently."""
+    if creds is None:
+        creds = ProviderCredentials()
     ollama_status, openai_status, anthropic_status, cerebras_status, vercel_status = (
         await asyncio.gather(
-            _check_ollama(),
-            _check_openai(),
-            _check_anthropic(),
-            _check_cerebras(),
-            _check_vercel(),
+            _check_ollama(creds),
+            _check_openai(creds),
+            _check_anthropic(creds),
+            _check_cerebras(creds),
+            _check_vercel(creds),
             return_exceptions=False,
         )
     )
@@ -257,10 +351,12 @@ async def _stream_ollama(
     messages: list[dict],
     model: str,
     system_prompt: str | None,
+    creds: ProviderCredentials,
 ) -> AsyncGenerator[str, None]:
+    host = creds.get_ollama()
     full_messages = _prepend_system(messages, system_prompt)
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_host, timeout=120) as client:
+        async with httpx.AsyncClient(base_url=host, timeout=120) as client:
             async with client.stream(
                 "POST",
                 "/api/chat",
@@ -288,7 +384,7 @@ async def _stream_ollama(
                         break
     except httpx.ConnectError:
         raise RuntimeError(
-            f"Cannot connect to Ollama at {settings.ollama_host}. "
+            f"Cannot connect to Ollama at {host}. "
             "Make sure Ollama is running (`ollama serve`) or switch to a cloud provider."
         ) from None
 
@@ -297,9 +393,10 @@ async def _stream_openai(
     messages: list[dict],
     model: str,
     system_prompt: str | None,
+    creds: ProviderCredentials,
 ) -> AsyncGenerator[str, None]:
     full_messages = _prepend_system(messages, system_prompt)
-    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    client = openai.AsyncOpenAI(api_key=creds.get_openai())
     async with client.chat.completions.stream(
         model=model,
         messages=full_messages,  # type: ignore[arg-type]
@@ -314,6 +411,7 @@ async def _stream_anthropic(
     messages: list[dict],
     model: str,
     system_prompt: str | None,
+    creds: ProviderCredentials,
 ) -> AsyncGenerator[str, None]:
     # Anthropic keeps system separate; strip any embedded system turn
     chat_messages = [m for m in messages if m["role"] != "system"]
@@ -324,7 +422,7 @@ async def _stream_anthropic(
     )
     resolved_system = system_prompt or embedded
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.AsyncAnthropic(api_key=creds.get_anthropic())
     kwargs: dict = {
         "model": model,
         "max_tokens": 4096,
@@ -343,10 +441,11 @@ async def _stream_cerebras(
     messages: list[dict],
     model: str,
     system_prompt: str | None,
+    creds: ProviderCredentials,
 ) -> AsyncGenerator[str, None]:
     full_messages = _prepend_system(messages, system_prompt)
     client = openai.AsyncOpenAI(
-        api_key=settings.cerebras_api_key,
+        api_key=creds.get_cerebras(),
         base_url="https://api.cerebras.ai/v1",
     )
     async with client.chat.completions.stream(
@@ -363,11 +462,12 @@ async def _stream_vercel(
     messages: list[dict],
     model: str,
     system_prompt: str | None,
+    creds: ProviderCredentials,
 ) -> AsyncGenerator[str, None]:
     full_messages = _prepend_system(messages, system_prompt)
     client = openai.AsyncOpenAI(
-        api_key=settings.vercel_api_token,
-        base_url=settings.vercel_gateway_url,
+        api_key=creds.get_vercel(),
+        base_url=creds.get_gateway_url(),
     )
     async with client.chat.completions.stream(
         model=model,
@@ -386,6 +486,7 @@ async def stream_chat(
     model: str,
     provider: Provider | str,
     system_prompt: str | None = None,
+    creds: ProviderCredentials | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream tokens from the chosen provider.
 
@@ -397,22 +498,27 @@ async def stream_chat(
     model:
         Provider-specific model identifier.
     provider:
-        One of ``"ollama"``, ``"openai"``, or ``"anthropic"``.
+        One of ``"ollama"``, ``"openai"``, ``"anthropic"``, ``"cerebras"``, ``"vercel"``.
     system_prompt:
         Optional explicit system prompt. Takes precedence over any system turn
         embedded in *messages*.
+    creds:
+        Optional runtime credential overrides. Falls back to env vars when absent.
     """
+    if creds is None:
+        creds = ProviderCredentials()
+
     match Provider(provider):
         case Provider.OPENAI:
-            gen = _stream_openai(messages, model, system_prompt)
+            gen = _stream_openai(messages, model, system_prompt, creds)
         case Provider.ANTHROPIC:
-            gen = _stream_anthropic(messages, model, system_prompt)
+            gen = _stream_anthropic(messages, model, system_prompt, creds)
         case Provider.CEREBRAS:
-            gen = _stream_cerebras(messages, model, system_prompt)
+            gen = _stream_cerebras(messages, model, system_prompt, creds)
         case Provider.VERCEL:
-            gen = _stream_vercel(messages, model, system_prompt)
+            gen = _stream_vercel(messages, model, system_prompt, creds)
         case Provider.OLLAMA:
-            gen = _stream_ollama(messages, model, system_prompt)
+            gen = _stream_ollama(messages, model, system_prompt, creds)
         case _:
             raise ValueError(f"Unknown provider: {provider!r}")
 
@@ -425,10 +531,11 @@ async def complete_chat(
     model: str,
     provider: Provider | str,
     system_prompt: str | None = None,
+    creds: ProviderCredentials | None = None,
 ) -> str:
     """Non-streaming variant: collect all tokens and return the full response."""
     tokens: list[str] = []
-    async for token in stream_chat(messages, model, provider, system_prompt):
+    async for token in stream_chat(messages, model, provider, system_prompt, creds):
         tokens.append(token)
     return "".join(tokens)
 
