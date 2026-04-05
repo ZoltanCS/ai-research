@@ -1,9 +1,11 @@
 """Unified AI provider service.
 
-Supports three providers via a single stream_chat interface:
-  - ollama   (local, fetches available models dynamically)
-  - openai   (cloud, static model list)
+Supports five providers via a single stream_chat interface:
+  - ollama    (local, fetches available models dynamically)
+  - openai    (cloud, static model list)
   - anthropic (cloud, static model list)
+  - cerebras  (cloud, fast inference, OpenAI-compatible)
+  - vercel    (AI Gateway proxy, OpenAI-compatible)
 
 Usage
 -----
@@ -36,6 +38,8 @@ class Provider(StrEnum):
     OLLAMA = "ollama"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    CEREBRAS = "cerebras"
+    VERCEL = "vercel"
 
 
 # ── Model catalogue ───────────────────────────────────────────────────────────
@@ -58,6 +62,26 @@ _ANTHROPIC_MODELS: list[ModelInfo] = [
     ModelInfo("claude-opus-4-5",   "Claude Opus 4.5",   Provider.ANTHROPIC, 200_000),
     ModelInfo("claude-sonnet-4-5", "Claude Sonnet 4.5", Provider.ANTHROPIC, 200_000),
     ModelInfo("claude-haiku-4-5",  "Claude Haiku 4.5",  Provider.ANTHROPIC, 200_000),
+]
+
+_CEREBRAS_MODELS: list[ModelInfo] = [
+    ModelInfo("llama-3.3-70b", "Llama 3.3 70B",  Provider.CEREBRAS, 128_000),
+    ModelInfo("llama3.1-70b",  "Llama 3.1 70B",  Provider.CEREBRAS, 128_000),
+    ModelInfo("llama3.1-8b",   "Llama 3.1 8B",   Provider.CEREBRAS, 128_000),
+    ModelInfo("qwen-3-32b",    "Qwen 3 32B",     Provider.CEREBRAS,  32_000),
+]
+
+# Models available through Vercel AI Gateway (subset of popular cross-provider models).
+# Prefix format is <provider-slug>/<model-id> as required by the gateway.
+_VERCEL_MODELS: list[ModelInfo] = [
+    ModelInfo("openai/gpt-4o",                          "GPT-4o",                Provider.VERCEL, 128_000),
+    ModelInfo("openai/gpt-4o-mini",                     "GPT-4o Mini",           Provider.VERCEL, 128_000),
+    ModelInfo("anthropic/claude-opus-4-5",              "Claude Opus 4.5",       Provider.VERCEL, 200_000),
+    ModelInfo("anthropic/claude-sonnet-4-5",            "Claude Sonnet 4.5",     Provider.VERCEL, 200_000),
+    ModelInfo("google/gemini-2.0-flash",                "Gemini 2.0 Flash",      Provider.VERCEL, 1_000_000),
+    ModelInfo("google/gemini-1.5-pro",                  "Gemini 1.5 Pro",        Provider.VERCEL, 2_000_000),
+    ModelInfo("meta-llama/llama-3.3-70b-instruct",      "Llama 3.3 70B",         Provider.VERCEL, 128_000),
+    ModelInfo("deepseek/deepseek-r1",                   "DeepSeek R1",           Provider.VERCEL, 128_000),
 ]
 
 
@@ -93,6 +117,10 @@ async def list_models(provider: Provider | str) -> list[ModelInfo]:
             return _OPENAI_MODELS
         case Provider.ANTHROPIC:
             return _ANTHROPIC_MODELS
+        case Provider.CEREBRAS:
+            return _CEREBRAS_MODELS
+        case Provider.VERCEL:
+            return _VERCEL_MODELS
         case Provider.OLLAMA:
             return await _list_ollama_models()
 
@@ -105,18 +133,24 @@ async def _static(value):
 async def list_all_models() -> dict[str, list[ModelInfo]]:
     """Return models for all providers concurrently.
 
-    Ollama is fetched live; OpenAI and Anthropic lists are static but
-    gathered in the same call so the caller always gets a uniform dict.
+    Ollama is fetched live; all other lists are static but gathered in the
+    same call so the caller always gets a uniform dict.
     """
-    ollama_models, openai_models, anthropic_models = await asyncio.gather(
-        _list_ollama_models(),
-        _static(_OPENAI_MODELS),
-        _static(_ANTHROPIC_MODELS),
+    ollama_models, openai_models, anthropic_models, cerebras_models, vercel_models = (
+        await asyncio.gather(
+            _list_ollama_models(),
+            _static(_OPENAI_MODELS),
+            _static(_ANTHROPIC_MODELS),
+            _static(_CEREBRAS_MODELS),
+            _static(_VERCEL_MODELS),
+        )
     )
     return {
         Provider.OLLAMA: ollama_models,
         Provider.OPENAI: openai_models,
         Provider.ANTHROPIC: anthropic_models,
+        Provider.CEREBRAS: cerebras_models,
+        Provider.VERCEL: vercel_models,
     }
 
 
@@ -161,18 +195,59 @@ async def _check_anthropic() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
+async def _check_cerebras() -> dict:
+    if not settings.cerebras_api_key:
+        return {"status": "unconfigured", "detail": "CEREBRAS_API_KEY not set"}
+    try:
+        client = openai.AsyncOpenAI(
+            api_key=settings.cerebras_api_key,
+            base_url="https://api.cerebras.ai/v1",
+        )
+        await client.models.list()
+        return {"status": "ok"}
+    except openai.AuthenticationError:
+        return {"status": "error", "detail": "Invalid API key"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+async def _check_vercel() -> dict:
+    if not settings.vercel_api_token:
+        return {"status": "unconfigured", "detail": "VERCEL_API_TOKEN not set"}
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                f"{settings.vercel_gateway_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {settings.vercel_api_token}"},
+            )
+            r.raise_for_status()
+        return {"status": "ok", "host": settings.vercel_gateway_url}
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            return {"status": "error", "detail": "Invalid Vercel API token"}
+        return {"status": "error", "detail": str(e)}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
 async def get_provider_status() -> dict[str, dict]:
-    """Run health checks for all three providers concurrently."""
-    ollama_status, openai_status, anthropic_status = await asyncio.gather(
-        _check_ollama(),
-        _check_openai(),
-        _check_anthropic(),
-        return_exceptions=False,
+    """Run health checks for all providers concurrently."""
+    ollama_status, openai_status, anthropic_status, cerebras_status, vercel_status = (
+        await asyncio.gather(
+            _check_ollama(),
+            _check_openai(),
+            _check_anthropic(),
+            _check_cerebras(),
+            _check_vercel(),
+            return_exceptions=False,
+        )
     )
     return {
         Provider.OLLAMA: ollama_status,
         Provider.OPENAI: openai_status,
         Provider.ANTHROPIC: anthropic_status,
+        Provider.CEREBRAS: cerebras_status,
+        Provider.VERCEL: vercel_status,
     }
 
 
@@ -264,6 +339,46 @@ async def _stream_anthropic(
             yield text
 
 
+async def _stream_cerebras(
+    messages: list[dict],
+    model: str,
+    system_prompt: str | None,
+) -> AsyncGenerator[str, None]:
+    full_messages = _prepend_system(messages, system_prompt)
+    client = openai.AsyncOpenAI(
+        api_key=settings.cerebras_api_key,
+        base_url="https://api.cerebras.ai/v1",
+    )
+    async with client.chat.completions.stream(
+        model=model,
+        messages=full_messages,  # type: ignore[arg-type]
+        max_tokens=8192,
+    ) as stream:
+        async for event in stream:
+            if event.choices and event.choices[0].delta.content:
+                yield event.choices[0].delta.content
+
+
+async def _stream_vercel(
+    messages: list[dict],
+    model: str,
+    system_prompt: str | None,
+) -> AsyncGenerator[str, None]:
+    full_messages = _prepend_system(messages, system_prompt)
+    client = openai.AsyncOpenAI(
+        api_key=settings.vercel_api_token,
+        base_url=settings.vercel_gateway_url,
+    )
+    async with client.chat.completions.stream(
+        model=model,
+        messages=full_messages,  # type: ignore[arg-type]
+        max_tokens=4096,
+    ) as stream:
+        async for event in stream:
+            if event.choices and event.choices[0].delta.content:
+                yield event.choices[0].delta.content
+
+
 # ── Public interface ──────────────────────────────────────────────────────────
 
 async def stream_chat(
@@ -292,6 +407,10 @@ async def stream_chat(
             gen = _stream_openai(messages, model, system_prompt)
         case Provider.ANTHROPIC:
             gen = _stream_anthropic(messages, model, system_prompt)
+        case Provider.CEREBRAS:
+            gen = _stream_cerebras(messages, model, system_prompt)
+        case Provider.VERCEL:
+            gen = _stream_vercel(messages, model, system_prompt)
         case Provider.OLLAMA:
             gen = _stream_ollama(messages, model, system_prompt)
         case _:

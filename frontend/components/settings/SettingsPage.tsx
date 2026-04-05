@@ -7,6 +7,8 @@ import {
   Server,
   Zap,
   Brain,
+  Cpu,
+  Globe,
   Eye,
   EyeOff,
   Trash2,
@@ -368,6 +370,50 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between px-4 py-3">
               <p className="text-xs text-zinc-500">ANTHROPIC_API_KEY</p>
               <KeyStatus configured={statuses.anthropic?.status === "ok"} />
+            </div>
+          </div>
+
+          {/* Cerebras */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 divide-y divide-zinc-800 overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-3">
+              <Cpu size={15} className="text-zinc-500" />
+              <span className="text-sm font-medium text-zinc-300 flex-1">
+                Cerebras
+              </span>
+              <ProviderDot status={statuses.cerebras?.status} />
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <p className="text-xs text-zinc-500">CEREBRAS_API_KEY</p>
+              <KeyStatus configured={statuses.cerebras?.status === "ok"} />
+            </div>
+            <div className="px-4 py-2">
+              <p className="text-[11px] text-zinc-700">
+                Fast inference cloud · <span className="font-mono">api.cerebras.ai</span>
+              </p>
+            </div>
+          </div>
+
+          {/* Vercel AI Gateway */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 divide-y divide-zinc-800 overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-3">
+              <Globe size={15} className="text-zinc-500" />
+              <span className="text-sm font-medium text-zinc-300 flex-1">
+                Vercel AI Gateway
+              </span>
+              <ProviderDot status={statuses.vercel?.status} />
+            </div>
+            <div className="flex items-center justify-between px-4 py-3">
+              <p className="text-xs text-zinc-500">VERCEL_API_TOKEN</p>
+              <KeyStatus configured={statuses.vercel?.status === "ok"} />
+            </div>
+            <div className="px-4 py-3 space-y-1">
+              <p className="text-xs text-zinc-500">Gateway URL</p>
+              <p className="text-[11px] text-zinc-700 font-mono">
+                {statuses.vercel?.host ?? "https://ai-gateway.vercel.sh/v1"}
+              </p>
+              <p className="text-[11px] text-zinc-700">
+                Set VERCEL_GATEWAY_URL in .env to use a custom deployment
+              </p>
             </div>
           </div>
         </Section>

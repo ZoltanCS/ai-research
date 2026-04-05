@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
 
     # LLM providers
-    llm_provider: str = "ollama"  # ollama | openai | anthropic
+    llm_provider: str = "ollama"  # ollama | openai | anthropic | cerebras | vercel
 
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "llama3.2"
@@ -25,6 +25,15 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-6"
+
+    # Cerebras (fast inference cloud, OpenAI-compatible)
+    cerebras_api_key: str = ""
+    cerebras_model: str = "llama-3.3-70b"
+
+    # Vercel AI Gateway (proxy to multiple providers, OpenAI-compatible)
+    vercel_api_token: str = ""
+    vercel_gateway_url: str = "https://ai-gateway.vercel.sh/v1"
+    vercel_model: str = "openai/gpt-4o"
 
     # ── Embeddings ────────────────────────────────────────────────────────────
     # "ollama" uses nomic-embed-text; "openai" uses text-embedding-3-small

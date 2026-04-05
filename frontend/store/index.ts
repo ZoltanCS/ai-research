@@ -16,7 +16,7 @@ export interface LocalMessage {
 interface PersistedSettings {
   // Model selection
   selectedModel: string;
-  selectedProvider: "ollama" | "openai" | "anthropic";
+  selectedProvider: "ollama" | "openai" | "anthropic" | "cerebras" | "vercel";
   // Chat defaults
   useRag: boolean;
   useWebSearch: boolean;
@@ -27,7 +27,7 @@ interface PersistedSettings {
   ollamaHost: string;
   // Per-task model defaults
   defaultResearchModel: string;
-  defaultResearchProvider: "ollama" | "openai" | "anthropic";
+  defaultResearchProvider: "ollama" | "openai" | "anthropic" | "cerebras" | "vercel";
 }
 
 interface StoreState extends PersistedSettings {

@@ -56,6 +56,8 @@ export interface AllModels {
   ollama: ModelInfo[];
   openai: ModelInfo[];
   anthropic: ModelInfo[];
+  cerebras: ModelInfo[];
+  vercel: ModelInfo[];
 }
 
 export interface ProviderStatus {

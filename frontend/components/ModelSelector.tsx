@@ -1,23 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Server, Zap, Brain, Check } from "lucide-react";
+import { ChevronDown, Server, Zap, Brain, Cpu, Globe, Check } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useStore } from "@/store";
 import { getModels, getProviderStatus, type AllModels, type ProviderStatus } from "@/lib/api";
 
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
-const PROVIDERS = ["ollama", "openai", "anthropic"] as const;
+const PROVIDERS = ["ollama", "openai", "anthropic", "cerebras", "vercel"] as const;
 type ProviderKey = (typeof PROVIDERS)[number];
 
 const PROVIDER_META: Record<
   ProviderKey,
   { label: string; Icon: React.ElementType }
 > = {
-  ollama:    { label: "Ollama",    Icon: Server },
-  openai:    { label: "OpenAI",   Icon: Zap    },
-  anthropic: { label: "Anthropic", Icon: Brain  },
+  ollama:    { label: "Ollama",           Icon: Server },
+  openai:    { label: "OpenAI",           Icon: Zap    },
+  anthropic: { label: "Anthropic",        Icon: Brain  },
+  cerebras:  { label: "Cerebras",         Icon: Cpu    },
+  vercel:    { label: "Vercel Gateway",   Icon: Globe  },
 };
 
 // ── Status dot ────────────────────────────────────────────────────────────────
@@ -41,6 +43,8 @@ export default function ModelSelector() {
     ollama: [],
     openai: [],
     anthropic: [],
+    cerebras: [],
+    vercel: [],
   });
   const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>({});
   const [loading, setLoading] = useState(true);
