@@ -29,7 +29,7 @@ class StreamChatRequest(BaseModel):
     """Request body for POST /api/chat/stream and POST /api/chat/complete."""
     messages: list[ChatMessage] = Field(..., min_length=1)
     model: str = Field(..., min_length=1)
-    provider: str = Field(default="ollama", pattern="^(ollama|openai|anthropic)$")
+    provider: str = Field(default="ollama", pattern="^(ollama|openai|anthropic|cerebras|vercel)$")
     system_prompt: str | None = Field(default=None, max_length=8000)
     conversation_id: uuid.UUID | None = None
     use_rag: bool = False
@@ -218,7 +218,7 @@ class ProvidersStatusResponse(BaseModel):
 class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     model: str = Field(..., min_length=1)
-    provider: str = Field(default="ollama", pattern="^(ollama|openai|anthropic)$")
+    provider: str = Field(default="ollama", pattern="^(ollama|openai|anthropic|cerebras|vercel)$")
     max_sub_questions: int = Field(default=4, ge=1, le=8)
     max_results_per_query: int = Field(default=5, ge=1, le=10)
     top_k_sources: int = Field(default=6, ge=1, le=20)
