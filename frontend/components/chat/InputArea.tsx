@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ChangeEvent,
 } from "react";
-import { Send, Square, Paperclip, Globe, BookOpen, X } from "lucide-react";
+import { Send, Square, Paperclip, Globe, BookOpen, X, ChevronDown } from "lucide-react";
 import { useStore } from "@/store";
 import { uploadDocument } from "@/lib/api";
 
@@ -15,6 +15,74 @@ interface Props {
   onSubmit: (input: string) => void;
   onStop: () => void;
 }
+
+// ── Personality quick-switcher ────────────────────────────────────────────────
+
+function PersonalityBadge() {
+  const { personalities, activePersonalityId, setActivePersonality } = useStore();
+  const [open, setOpen] = useState(false);
+
+  const active = personalities?.find((p) => p.id === activePersonalityId) ?? personalities?.[0];
+
+  if (!active) return null;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/60 rounded-full text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+        title="Switch personality"
+      >
+        <span className="text-sm leading-none">{active.avatar}</span>
+        <span className="max-w-[80px] truncate">{active.name}</span>
+        <ChevronDown size={10} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+          />
+          {/* Dropdown */}
+          <div className="absolute bottom-full mb-2 left-0 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl overflow-hidden">
+            <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-widest border-b border-zinc-800">
+              Personality
+            </div>
+            <div className="max-h-64 overflow-y-auto py-1">
+              {personalities?.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setActivePersonality(p.id);
+                    setOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                    p.id === activePersonalityId
+                      ? "bg-blue-950/40 text-blue-200"
+                      : "text-zinc-300 hover:bg-zinc-800"
+                  }`}
+                >
+                  <span className="text-base leading-none flex-shrink-0">{p.avatar}</span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium truncate">{p.name}</div>
+                    <div className="text-[10px] text-zinc-500 truncate">{p.description}</div>
+                  </div>
+                  {p.id === activePersonalityId && (
+                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── InputArea ─────────────────────────────────────────────────────────────────
 
 export default function InputArea({ onSubmit, onStop }: Props) {
   const { isStreaming, useRag, useWebSearch, setSettings } = useStore();
@@ -169,10 +237,13 @@ export default function InputArea({ onSubmit, onStop }: Props) {
           )}
         </div>
 
-        {/* Hint */}
-        <p className="text-center text-[11px] text-zinc-700">
-          Enter to send · Shift+Enter for newline
-        </p>
+        {/* Bottom row: personality badge + hint */}
+        <div className="flex items-center justify-between px-1">
+          <PersonalityBadge />
+          <p className="text-[11px] text-zinc-700">
+            Enter to send · Shift+Enter for newline
+          </p>
+        </div>
       </div>
     </div>
   );
