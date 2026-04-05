@@ -440,7 +440,10 @@ export async function login(username: string, password: string): Promise<AuthRes
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail ?? "Login failed");
+    const msg = Array.isArray(err.detail)
+      ? err.detail.map((e: { msg: string }) => e.msg).join(", ")
+      : err.detail ?? "Login failed";
+    throw new Error(msg);
   }
   return res.json();
 }
@@ -453,7 +456,10 @@ export async function register(username: string, email: string, password: string
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail ?? "Registration failed");
+    const msg = Array.isArray(err.detail)
+      ? err.detail.map((e: { msg: string }) => e.msg).join(", ")
+      : err.detail ?? "Registration failed";
+    throw new Error(msg);
   }
   return res.json();
 }

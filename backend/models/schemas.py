@@ -274,7 +274,7 @@ class HealthResponse(BaseModel):
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class UserRegister(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_]+$")
+    username: str = Field(..., min_length=3, max_length=50)
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=8)
 
