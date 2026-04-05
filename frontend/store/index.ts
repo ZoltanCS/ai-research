@@ -14,11 +14,20 @@ export interface LocalMessage {
 }
 
 interface PersistedSettings {
+  // Model selection
   selectedModel: string;
   selectedProvider: "ollama" | "openai" | "anthropic";
+  // Chat defaults
   useRag: boolean;
   useWebSearch: boolean;
   systemPrompt: string;
+  // Appearance
+  theme: "dark" | "light";
+  // Provider overrides (local override of env; backend still needs .env for actual auth)
+  ollamaHost: string;
+  // Per-task model defaults
+  defaultResearchModel: string;
+  defaultResearchProvider: "ollama" | "openai" | "anthropic";
 }
 
 interface StoreState extends PersistedSettings {
@@ -29,15 +38,14 @@ interface StoreState extends PersistedSettings {
 
   // ── Actions ────────────────────────────────────────────────────────────────
   addMessage: (msg: LocalMessage) => void;
-  /** Append a token delta to the last (streaming) assistant message. */
   appendToLastMessage: (delta: string) => void;
-  /** Mark the last assistant message as complete; optionally attach sources. */
   finalizeLastMessage: (sources?: LocalMessage["sources"]) => void;
   setConversationId: (id: string | null) => void;
   setIsStreaming: (v: boolean) => void;
   clearChat: () => void;
   setModel: (model: string, provider: string) => void;
   setSettings: (s: Partial<PersistedSettings>) => void;
+  toggleTheme: () => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -51,6 +59,10 @@ export const useStore = create<StoreState>()(
       useRag: false,
       useWebSearch: false,
       systemPrompt: "",
+      theme: "dark",
+      ollamaHost: "",
+      defaultResearchModel: "",
+      defaultResearchProvider: "ollama",
 
       // ── Session defaults ───────────────────────────────────────────────────
       conversationId: null,
@@ -98,16 +110,22 @@ export const useStore = create<StoreState>()(
         }),
 
       setSettings: (s) => set(s),
+
+      toggleTheme: () =>
+        set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
     }),
     {
       name: "localmind-store",
-      // Only persist user preferences, not session state
       partialize: (state) => ({
         selectedModel: state.selectedModel,
         selectedProvider: state.selectedProvider,
         useRag: state.useRag,
         useWebSearch: state.useWebSearch,
         systemPrompt: state.systemPrompt,
+        theme: state.theme,
+        ollamaHost: state.ollamaHost,
+        defaultResearchModel: state.defaultResearchModel,
+        defaultResearchProvider: state.defaultResearchProvider,
       }),
     }
   )

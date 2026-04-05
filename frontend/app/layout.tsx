@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 import TopBar from "@/components/TopBar";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "LocalMind",
@@ -14,17 +15,27 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body
-        className="font-sans bg-background text-foreground antialiased"
-      >
-        <div className="flex h-screen overflow-hidden">
-          <Sidebar />
-          <div className="flex flex-1 flex-col min-w-0">
-            <TopBar />
-            <main className="flex-1 overflow-hidden">{children}</main>
+    // suppressHydrationWarning lets the blocking script set the class without
+    // React complaining about a server/client mismatch.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Blocking script: apply saved theme before first paint to avoid flash */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('localmind-store')||'{}');if((s.state||s).theme!=='light')document.documentElement.classList.add('dark');}catch(e){}})();`,
+          }}
+        />
+      </head>
+      <body className="font-sans bg-background text-foreground antialiased">
+        <ThemeProvider>
+          <div className="flex h-screen overflow-hidden">
+            <Sidebar />
+            <div className="flex flex-1 flex-col min-w-0">
+              <TopBar />
+              <main className="flex-1 overflow-hidden">{children}</main>
+            </div>
           </div>
-        </div>
+        </ThemeProvider>
       </body>
     </html>
   );

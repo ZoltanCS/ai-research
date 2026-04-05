@@ -26,6 +26,7 @@ export interface Document {
   filename: string;
   content_type: string;
   chunk_count: number;
+  file_size?: number | null;
   created_at: string;
 }
 
@@ -237,6 +238,36 @@ export async function uploadDocument(file: File): Promise<Document> {
     throw new Error(err.detail ?? "Upload failed");
   }
   return res.json();
+}
+
+/** Upload a document and report progress (0-100) via onProgress callback. */
+export function uploadDocumentWithProgress(
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<Document> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        try {
+          reject(new Error(JSON.parse(xhr.responseText)?.detail ?? "Upload failed"));
+        } catch {
+          reject(new Error("Upload failed"));
+        }
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.open("POST", `${API_BASE}/api/documents`);
+    xhr.send(formData);
+  });
 }
 
 export async function getDocuments(): Promise<Document[]> {
