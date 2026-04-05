@@ -32,6 +32,8 @@ async def get_all_models():
         ollama=_convert(all_models[Provider.OLLAMA]),
         openai=_convert(all_models[Provider.OPENAI]),
         anthropic=_convert(all_models[Provider.ANTHROPIC]),
+        cerebras=_convert(all_models[Provider.CEREBRAS]),
+        vercel=_convert(all_models[Provider.VERCEL]),
     )
 
 
@@ -59,4 +61,6 @@ async def get_providers_status():
         ollama=_to_schema(statuses[Provider.OLLAMA]),
         openai=_to_schema(statuses[Provider.OPENAI]),
         anthropic=_to_schema(statuses[Provider.ANTHROPIC]),
+        cerebras=_to_schema(statuses[Provider.CEREBRAS]),
+        vercel=_to_schema(statuses[Provider.VERCEL]),
     )

@@ -201,12 +201,16 @@ class AllModelsResponse(BaseModel):
     ollama: list[ModelInfoOut] = []
     openai: list[ModelInfoOut] = []
     anthropic: list[ModelInfoOut] = []
+    cerebras: list[ModelInfoOut] = []
+    vercel: list[ModelInfoOut] = []
 
 
 class ProvidersStatusResponse(BaseModel):
     ollama: ProviderStatusOut
     openai: ProviderStatusOut
     anthropic: ProviderStatusOut
+    cerebras: ProviderStatusOut
+    vercel: ProviderStatusOut
 
 
 # ── Research (deep agent) ─────────────────────────────────────────────────────
