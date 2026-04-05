@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from models.database import ResearchReport
-from services.ai_provider import Provider, complete_chat, stream_chat
+from services.ai_provider import Provider, ProviderCredentials, complete_chat, stream_chat
 from services.web_search import scrape_url, search
 
 log = logging.getLogger(__name__)
@@ -94,8 +94,9 @@ def _parse_sub_questions(raw: str, max_q: int) -> list[str]:
 class ResearchAgent:
     """Orchestrates the four-step deep research pipeline."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, creds: ProviderCredentials | None = None) -> None:
         self._db = db
+        self._creds = creds or ProviderCredentials()
 
     async def run(
         self,
@@ -191,6 +192,7 @@ class ResearchAgent:
                 model=model,
                 provider=provider,
                 system_prompt=_SYNTHESISE_SYSTEM,
+                creds=self._creds,
             ):
                 report_tokens.append(token)
                 yield _token(token)
@@ -227,6 +229,7 @@ class ResearchAgent:
             model=model,
             provider=provider,
             system_prompt=_DECOMPOSE_SYSTEM,
+            creds=self._creds,
         )
         questions = _parse_sub_questions(raw, max_q)
         if not questions:

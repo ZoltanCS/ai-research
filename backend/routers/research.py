@@ -13,7 +13,7 @@ POST /api/research/search
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,10 +27,22 @@ from models.schemas import (
     SearchRequest,
     SearchResponse,
 )
+from services.ai_provider import ProviderCredentials
 from services.research_agent import ResearchAgent
 from services.search import web_search
 
 router = APIRouter()
+
+
+def _creds(req: Request) -> ProviderCredentials:
+    return ProviderCredentials(
+        openai_key=req.headers.get("X-OpenAI-Key", ""),
+        anthropic_key=req.headers.get("X-Anthropic-Key", ""),
+        cerebras_key=req.headers.get("X-Cerebras-Key", ""),
+        vercel_token=req.headers.get("X-Vercel-Token", ""),
+        vercel_gateway_url=req.headers.get("X-Vercel-Gateway", ""),
+        ollama_host=req.headers.get("X-Ollama-Host", ""),
+    )
 
 
 # ── Deep Research ─────────────────────────────────────────────────────────────
@@ -38,10 +50,11 @@ router = APIRouter()
 @router.post("/start")
 async def start_research(
     request: ResearchRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Begin an autonomous deep-research run and stream SSE progress events."""
-    agent = ResearchAgent(db)
+    agent = ResearchAgent(db, creds=_creds(http_request))
 
     async def event_stream():
         gen = await agent.run(

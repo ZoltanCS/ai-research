@@ -641,14 +641,20 @@ async def stream_chat_with_tools(
     full_messages = _prepend_system(messages, system_prompt)
 
     # First call — non-streaming to detect tool use
-    response = await client.chat.completions.create(
-        model=model,
-        messages=full_messages,  # type: ignore[arg-type]
-        tools=[WEB_SEARCH_TOOL_OPENAI],  # type: ignore[arg-type]
-        tool_choice="auto",
-        max_tokens=4096,
-    )
-    choice = response.choices[0]
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=full_messages,  # type: ignore[arg-type]
+            tools=[WEB_SEARCH_TOOL_OPENAI],  # type: ignore[arg-type]
+            tool_choice="auto",
+            max_tokens=4096,
+        )
+        choice = response.choices[0]
+    except Exception as exc:
+        log.warning("Tool calling not supported by %s/%s, falling back: %s", p, model, exc)
+        async for token in stream_chat(messages, model, p, system_prompt, creds):
+            yield token
+        return
 
     if choice.finish_reason == "tool_calls":
         tool_calls = choice.message.tool_calls or []

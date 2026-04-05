@@ -46,9 +46,26 @@ def _creds(req: Request) -> ProviderCredentials:
     )
 
 
-DEFAULT_SYSTEM_PROMPT = (
-    "You are LocalMind, a helpful AI research assistant. "
-    "Answer concisely and accurately. When referencing sources, cite them."
+DEFAULT_SYSTEM_PROMPT = """\
+You are LocalMind, an AI research and chat assistant built to help with in-depth research, \
+document analysis, and knowledge synthesis. You are running locally with full privacy.
+
+Your capabilities:
+- Answer questions accurately using your training knowledge
+- Analyse and summarise uploaded documents (RAG mode)
+- Search the web for current information when the web search tool is available
+- Run deep multi-step research sessions
+
+When web search is available to you, use it proactively for questions about \
+current events, recent data, prices, news, or anything where up-to-date \
+information matters. Always cite your sources.
+
+Be concise but thorough. Use markdown formatting for structure when helpful.\
+"""
+
+WEB_SEARCH_PROMPT_ADDON = (
+    "\n\nYou have access to a `web_search` tool. "
+    "Use it whenever the user's question would benefit from current or real-time information."
 )
 
 
@@ -168,7 +185,8 @@ async def stream_chat_endpoint(
         db, request.messages, request.use_rag, request.use_web_search
     )
 
-    resolved_system = request.system_prompt or DEFAULT_SYSTEM_PROMPT
+    base_system = request.system_prompt or DEFAULT_SYSTEM_PROMPT
+    resolved_system = base_system + (WEB_SEARCH_PROMPT_ADDON if request.use_web_search else "")
     provider = Provider(request.provider)
     model = request.model
     creds = _creds(http_request)
