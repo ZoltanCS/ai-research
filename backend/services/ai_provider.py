@@ -72,6 +72,25 @@ class ProviderCredentials:
     def get_ollama(self) -> str:
         return self.ollama_host or settings.ollama_host
 
+    @classmethod
+    async def from_db(cls, db) -> "ProviderCredentials":
+        """Load global settings from DB."""
+        from sqlalchemy import select
+        from models.database import GlobalSettings
+        try:
+            rows = await db.execute(select(GlobalSettings))
+            data = {r.key: r.value for r in rows.scalars()}
+            return cls(
+                openai_key=data.get("openai_api_key", ""),
+                anthropic_key=data.get("anthropic_api_key", ""),
+                cerebras_key=data.get("cerebras_api_key", ""),
+                vercel_token=data.get("vercel_api_token", ""),
+                vercel_gateway_url=data.get("vercel_gateway_url", ""),
+                ollama_host=data.get("ollama_host", ""),
+            )
+        except Exception:
+            return cls()
+
 
 # ── Model catalogue ───────────────────────────────────────────────────────────
 

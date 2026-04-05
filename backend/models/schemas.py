@@ -269,3 +269,53 @@ class SearchResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     app: str
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+class UserRegister(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_]+$")
+    email: str = Field(..., max_length=255)
+    password: str = Field(..., min_length=8)
+
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: uuid.UUID
+    username: str
+    email: str
+    is_admin: bool
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+# ── Admin settings ────────────────────────────────────────────────────────────
+
+class GlobalSettingsUpdate(BaseModel):
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    cerebras_api_key: str = ""
+    vercel_api_token: str = ""
+    vercel_gateway_url: str = ""
+    ollama_host: str = ""
+
+
+class GlobalSettingsOut(BaseModel):
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    cerebras_api_key: str = ""
+    vercel_api_token: str = ""
+    vercel_gateway_url: str = ""
+    ollama_host: str = ""

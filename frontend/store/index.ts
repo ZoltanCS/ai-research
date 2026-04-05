@@ -44,6 +44,9 @@ interface PersistedSettings {
   // Per-task model defaults
   defaultResearchModel: string;
   defaultResearchProvider: ProviderKey;
+  // Auth
+  authToken: string | null;
+  authUser: { id: string; username: string; email: string; is_admin: boolean } | null;
 }
 
 interface StoreState extends PersistedSettings {
@@ -68,6 +71,8 @@ interface StoreState extends PersistedSettings {
   ) => void;
   addCustomModel: (provider: string, modelId: string) => void;
   removeCustomModel: (provider: string, modelId: string) => void;
+  setAuth: (token: string, user: { id: string; username: string; email: string; is_admin: boolean }) => void;
+  clearAuth: () => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -99,6 +104,8 @@ export const useStore = create<StoreState>()(
       },
       defaultResearchModel: "",
       defaultResearchProvider: "ollama",
+      authToken: null,
+      authUser: null,
 
       // ── Session defaults ───────────────────────────────────────────────────
       conversationId: null,
@@ -176,6 +183,9 @@ export const useStore = create<StoreState>()(
             ),
           },
         })),
+
+      setAuth: (token, user) => set({ authToken: token, authUser: user }),
+      clearAuth: () => set({ authToken: null, authUser: null }),
     }),
     {
       name: "localmind-store",
@@ -191,6 +201,8 @@ export const useStore = create<StoreState>()(
         customModels: state.customModels,
         defaultResearchModel: state.defaultResearchModel,
         defaultResearchProvider: state.defaultResearchProvider,
+        authToken: state.authToken,
+        authUser: state.authUser,
       }),
     }
   )

@@ -7,6 +7,7 @@ function credHeaders(): Record<string, string> {
   const s = useStore.getState();
   const k = s.providerKeys;
   const h: Record<string, string> = {};
+  if (s.authToken) h["Authorization"] = `Bearer ${s.authToken}`;
   if (k.openai) h["X-OpenAI-Key"] = k.openai;
   if (k.anthropic) h["X-Anthropic-Key"] = k.anthropic;
   if (k.cerebras) h["X-Cerebras-Key"] = k.cerebras;
