@@ -57,15 +57,15 @@ class Settings(BaseSettings):
     max_context_docs: int = 5          # legacy alias
 
     # ── Web search ────────────────────────────────────────────────────────────
-    tavily_api_key: str = ""
-    searxng_host: str = ""             # e.g. http://localhost:8080
-    web_search_timeout: int = 15       # seconds per HTTP request
-    web_scrape_max_chars: int = 3000   # max chars to keep from scraped page
-    web_cache_ttl: int = 3600          # Redis TTL for search results (seconds)
+    exa_api_key: str = ""                # Exa — primary, designed for AI agents
+    tavily_api_key: str = ""             # Tavily — fallback
+    web_search_timeout: int = 15
+    web_scrape_max_chars: int = 3000
+    web_cache_ttl: int = 3600
 
     # ── Deep Research agent ───────────────────────────────────────────────────
-    research_max_sub_questions: int = 4   # default decomposition breadth
-    research_max_results_per_query: int = 5
+    research_max_sub_questions: int = 10
+    research_max_results_per_query: int = 10
     research_top_k_sources: int = 6       # sources fed to synthesis LLM
 
     # ── CORS ──────────────────────────────────────────────────────────────────

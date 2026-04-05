@@ -38,6 +38,7 @@ interface PersistedSettings {
     vercel: string;
     vercelGateway: string;
     tavily: string;
+    exa: string;
   };
   ollamaHost: string;
   // Custom model IDs per provider (user-managed additions)
@@ -95,6 +96,7 @@ export const useStore = create<StoreState>()(
         vercel: "",
         vercelGateway: "",
         tavily: "",
+        exa: "",
       },
       ollamaHost: "",
       customModels: {

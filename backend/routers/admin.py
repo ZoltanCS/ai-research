@@ -19,6 +19,7 @@ _KEYS = [
     "vercel_api_token",
     "vercel_gateway_url",
     "ollama_host",
+    "exa_api_key",
     "tavily_api_key",
 ]
 

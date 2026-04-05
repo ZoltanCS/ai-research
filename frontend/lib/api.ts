@@ -14,6 +14,7 @@ function credHeaders(): Record<string, string> {
   if (k.vercel) h["X-Vercel-Token"] = k.vercel;
   if (k.vercelGateway) h["X-Vercel-Gateway"] = k.vercelGateway;
   if (k.tavily) h["X-Tavily-Key"] = k.tavily;
+  if (k.exa) h["X-Exa-Key"] = k.exa;
   if (s.ollamaHost) h["X-Ollama-Host"] = s.ollamaHost;
   return h;
 }
@@ -367,9 +368,9 @@ export async function startResearch(params: {
       query: params.query,
       model: params.model,
       provider: params.provider,
-      max_sub_questions: params.maxSubQuestions ?? 4,
-      max_results_per_query: params.maxResultsPerQuery ?? 5,
-      top_k_sources: params.topKSources ?? 6,
+      max_sub_questions: params.maxSubQuestions ?? 10,
+      max_results_per_query: params.maxResultsPerQuery ?? 10,
+      top_k_sources: params.topKSources ?? 100,
     }),
     signal: params.signal,
   });

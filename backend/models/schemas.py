@@ -310,6 +310,7 @@ class GlobalSettingsUpdate(BaseModel):
     vercel_api_token: str = ""
     vercel_gateway_url: str = ""
     ollama_host: str = ""
+    exa_api_key: str = ""
     tavily_api_key: str = ""
 
 
@@ -320,4 +321,5 @@ class GlobalSettingsOut(BaseModel):
     vercel_api_token: str = ""
     vercel_gateway_url: str = ""
     ollama_host: str = ""
+    exa_api_key: str = ""
     tavily_api_key: str = ""
