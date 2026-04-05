@@ -37,6 +37,7 @@ interface PersistedSettings {
     cerebras: string;
     vercel: string;
     vercelGateway: string;
+    tavily: string;
   };
   ollamaHost: string;
   // Custom model IDs per provider (user-managed additions)
@@ -93,6 +94,7 @@ export const useStore = create<StoreState>()(
         cerebras: "",
         vercel: "",
         vercelGateway: "",
+        tavily: "",
       },
       ollamaHost: "",
       customModels: {

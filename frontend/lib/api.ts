@@ -13,6 +13,7 @@ function credHeaders(): Record<string, string> {
   if (k.cerebras) h["X-Cerebras-Key"] = k.cerebras;
   if (k.vercel) h["X-Vercel-Token"] = k.vercel;
   if (k.vercelGateway) h["X-Vercel-Gateway"] = k.vercelGateway;
+  if (k.tavily) h["X-Tavily-Key"] = k.tavily;
   if (s.ollamaHost) h["X-Ollama-Host"] = s.ollamaHost;
   return h;
 }

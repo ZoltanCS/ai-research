@@ -30,7 +30,6 @@ services:
       # Override with Docker-internal hostnames (take precedence over .env values)
       DATABASE_URL: postgresql+asyncpg://localmind:localmind@postgres:5432/localmind
       REDIS_URL: redis://redis:6379
-      SEARXNG_HOST: http://searxng:8080
       # Ollama runs on the Docker host.
       # Docker Desktop (Mac/Windows): host.docker.internal resolves automatically.
       # Linux: set OLLAMA_HOST=http://172.17.0.1:11434 in your .env file.
@@ -40,8 +39,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      searxng:
-        condition: service_started
     networks:
       - localmind
     restart: unless-stopped
@@ -82,28 +79,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    networks:
-      - localmind
-    restart: unless-stopped
-
-  # ── SearXNG (self-hosted web search fallback) ─────────────────────────────────
-  searxng:
-    image: searxng/searxng:latest
-    container_name: localmind-searxng
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./searxng:/etc/searxng:ro
-    environment:
-      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8080/}
-      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY:-localmind-dev-secret-change-me}
-    # Drop unneeded Linux capabilities for security
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
     networks:
       - localmind
     restart: unless-stopped

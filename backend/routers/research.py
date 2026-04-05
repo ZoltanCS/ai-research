@@ -42,6 +42,7 @@ def _creds(req: Request) -> ProviderCredentials:
         vercel_token=req.headers.get("X-Vercel-Token", ""),
         vercel_gateway_url=req.headers.get("X-Vercel-Gateway", ""),
         ollama_host=req.headers.get("X-Ollama-Host", ""),
+        tavily_key=req.headers.get("X-Tavily-Key", ""),
     )
 
 

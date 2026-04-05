@@ -53,6 +53,7 @@ class ProviderCredentials:
     vercel_token: str = ""
     vercel_gateway_url: str = ""
     ollama_host: str = ""
+    tavily_key: str = ""
 
     def get_openai(self) -> str:
         return self.openai_key or settings.openai_api_key
@@ -72,6 +73,9 @@ class ProviderCredentials:
     def get_ollama(self) -> str:
         return self.ollama_host or settings.ollama_host
 
+    def get_tavily(self) -> str:
+        return self.tavily_key or settings.tavily_api_key
+
     @classmethod
     async def from_db(cls, db) -> "ProviderCredentials":
         """Load global settings from DB."""
@@ -87,6 +91,7 @@ class ProviderCredentials:
                 vercel_token=data.get("vercel_api_token", ""),
                 vercel_gateway_url=data.get("vercel_gateway_url", ""),
                 ollama_host=data.get("ollama_host", ""),
+                tavily_key=data.get("tavily_api_key", ""),
             )
         except Exception:
             return cls()
@@ -676,7 +681,7 @@ async def stream_chat_with_tools(
 
                 try:
                     from services.web_search import search as web_search_fn
-                    result = await web_search_fn(query, max_results=5, include_content=False)
+                    result = await web_search_fn(query, max_results=5, include_content=False, tavily_key=creds.get_tavily())
                     results_text = "\n\n".join(
                         f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
                         for i, r in enumerate(result.results[:5])
@@ -753,7 +758,7 @@ async def _stream_with_tools_anthropic(
 
                 try:
                     from services.web_search import search as web_search_fn
-                    result = await web_search_fn(query, max_results=5, include_content=False)
+                    result = await web_search_fn(query, max_results=5, include_content=False, tavily_key=creds.get_tavily())
                     results_text = "\n\n".join(
                         f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
                         for i, r in enumerate(result.results[:5])
