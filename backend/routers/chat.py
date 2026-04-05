@@ -187,15 +187,15 @@ async def stream_chat_endpoint(
                 yield _sse(SSEToken(delta=token).model_dump_json())
 
             assistant_content = "".join(collected)
-            async with db.begin():
-                db.add(
-                    Message(
-                        id=uuid.uuid4(),
-                        conversation_id=conv.id,
-                        role="assistant",
-                        content=assistant_content,
-                    )
+            db.add(
+                Message(
+                    id=uuid.uuid4(),
+                    conversation_id=conv.id,
+                    role="assistant",
+                    content=assistant_content,
                 )
+            )
+            await db.commit()
         except Exception as exc:
             # Surface errors to the client via SSE before closing
             yield _sse(json.dumps({"error": str(exc)}))

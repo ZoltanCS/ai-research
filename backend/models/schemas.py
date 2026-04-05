@@ -219,9 +219,9 @@ class ResearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     model: str = Field(..., min_length=1)
     provider: str = Field(default="ollama", pattern="^(ollama|openai|anthropic|cerebras|vercel)$")
-    max_sub_questions: int = Field(default=4, ge=1, le=8)
-    max_results_per_query: int = Field(default=5, ge=1, le=10)
-    top_k_sources: int = Field(default=6, ge=1, le=20)
+    max_sub_questions: int = Field(default=10, ge=1, le=30)
+    max_results_per_query: int = Field(default=10, ge=1, le=50)
+    top_k_sources: int = Field(default=100, ge=1, le=200)
 
 
 class ResearchSourceOut(BaseModel):
