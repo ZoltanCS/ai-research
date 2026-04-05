@@ -507,3 +507,22 @@ export async function updateAdminSettings(settings: AdminSettings): Promise<Admi
   if (!res.ok) throw new Error("Failed to update admin settings");
   return res.json();
 }
+
+// ── Personalities ──────────────────────────────────────────────────────────────
+
+export async function generatePersonalityPrompt(params: {
+  name: string;
+  description: string;
+  tags: string[];
+  provider: string;
+  model: string;
+}): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/personalities/generate-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to generate prompt");
+  const data = await res.json();
+  return data.system_prompt;
+}

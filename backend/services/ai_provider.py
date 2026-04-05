@@ -593,6 +593,258 @@ async def stream_chat(
         yield token
 
 
+async def _stream_with_tools_openai_compat(
+    messages: list[dict],
+    model: str,
+    system_prompt: str | None,
+    creds: ProviderCredentials,
+    client: openai.AsyncOpenAI,
+) -> AsyncGenerator[str | dict, None]:
+    """Streaming tool-calling for OpenAI-compatible providers (OpenAI, Cerebras, Vercel).
+
+    Uses a single streaming call that detects tool use mid-stream — zero extra
+    latency when the model decides not to call a tool.
+    """
+    full_messages = _prepend_system(messages, system_prompt)
+
+    # Streaming call WITH tools — zero extra latency when no tool is called
+    stream = await client.chat.completions.create(
+        model=model,
+        messages=full_messages,  # type: ignore[arg-type]
+        tools=[WEB_SEARCH_TOOL_OPENAI],  # type: ignore[arg-type]
+        tool_choice="auto",
+        max_tokens=4096,
+        stream=True,
+    )
+
+    # Accumulate tool call fragments and text
+    tool_calls_acc: dict[int, dict] = {}
+    content_tokens: list[str] = []
+    finish_reason = None
+
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        if choice.finish_reason:
+            finish_reason = choice.finish_reason
+        delta = choice.delta
+
+        # Stream text tokens immediately
+        if delta.content:
+            content_tokens.append(delta.content)
+            yield delta.content
+
+        # Accumulate tool call fragments
+        if delta.tool_calls:
+            for tc_delta in delta.tool_calls:
+                idx = tc_delta.index
+                if idx not in tool_calls_acc:
+                    tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                if tc_delta.id:
+                    tool_calls_acc[idx]["id"] += tc_delta.id
+                if tc_delta.function:
+                    if tc_delta.function.name:
+                        tool_calls_acc[idx]["name"] += tc_delta.function.name
+                    if tc_delta.function.arguments:
+                        tool_calls_acc[idx]["arguments"] += tc_delta.function.arguments
+
+    if finish_reason != "tool_calls" or not tool_calls_acc:
+        return  # Normal completion, already streamed
+
+    # Build messages with tool calls for the second call
+    messages_with_tools: list[dict] = list(full_messages) + [
+        {
+            "role": "assistant",
+            "content": "".join(content_tokens) or None,
+            "tool_calls": [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                }
+                for tc in tool_calls_acc.values()
+            ],
+        }
+    ]
+
+    # Execute each tool call
+    for tc in tool_calls_acc.values():
+        if tc["name"] == "web_search":
+            try:
+                import json as _json
+                query = _json.loads(tc["arguments"]).get("query", "")
+            except Exception:
+                continue
+
+            yield {"tool_call": "web_search", "query": query}
+
+            try:
+                from services.web_search import search as _web_search
+                result = await _web_search(
+                    query, max_results=10, include_content=False,
+                    exa_key=creds.get_exa(), tavily_key=creds.get_tavily(),
+                )
+                results_text = "\n\n".join(
+                    f"[{i+1}] {r.title}\n{r.url}\n{r.snippet}"
+                    for i, r in enumerate(result.results[:10])
+                )
+                yield {"tool_result": True, "count": len(result.results)}
+            except Exception as exc:
+                results_text = f"Search failed: {exc}"
+                yield {"tool_result": True, "count": 0}
+
+            messages_with_tools.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": results_text,
+            })
+
+    # Stream final response after tool execution
+    final_stream = await client.chat.completions.create(
+        model=model,
+        messages=messages_with_tools,  # type: ignore[arg-type]
+        max_tokens=4096,
+        stream=True,
+    )
+    async for chunk in final_stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
+
+
+async def _stream_with_tools_anthropic(
+    messages: list[dict],
+    model: str,
+    system_prompt: str | None,
+    creds: ProviderCredentials,
+) -> AsyncGenerator[str | dict, None]:
+    """Streaming tool-calling loop for Anthropic provider."""
+    chat_messages = [m for m in messages if m["role"] != "system"]
+    embedded = next(
+        (m["content"] for m in messages if m["role"] == "system"), None
+    )
+    resolved_system = system_prompt or embedded
+
+    client = anthropic.AsyncAnthropic(api_key=creds.get_anthropic())
+
+    # Accumulate tool use blocks and text via streaming
+    tool_use_blocks_acc: dict[int, dict] = {}
+    content_tokens: list[str] = []
+    stop_reason = None
+
+    stream_kwargs: dict = {
+        "model": model,
+        "max_tokens": 4096,
+        "messages": chat_messages,
+        "tools": [WEB_SEARCH_TOOL_ANTHROPIC],
+    }
+    if resolved_system:
+        stream_kwargs["system"] = resolved_system
+
+    async with client.messages.stream(**stream_kwargs) as stream:
+        async for event in stream:
+            event_type = getattr(event, "type", None)
+
+            if event_type == "content_block_start":
+                block = getattr(event, "content_block", None)
+                if block and getattr(block, "type", None) == "tool_use":
+                    idx = getattr(event, "index", 0)
+                    tool_use_blocks_acc[idx] = {
+                        "id": getattr(block, "id", ""),
+                        "name": getattr(block, "name", ""),
+                        "input_str": "",
+                    }
+
+            elif event_type == "content_block_delta":
+                delta = getattr(event, "delta", None)
+                if delta:
+                    delta_type = getattr(delta, "type", None)
+                    if delta_type == "text_delta":
+                        text = getattr(delta, "text", "")
+                        if text:
+                            content_tokens.append(text)
+                            yield text
+                    elif delta_type == "input_json_delta":
+                        idx = getattr(event, "index", 0)
+                        partial = getattr(delta, "partial_json", "")
+                        if idx in tool_use_blocks_acc and partial:
+                            tool_use_blocks_acc[idx]["input_str"] += partial
+
+            elif event_type == "message_delta":
+                delta = getattr(event, "delta", None)
+                if delta:
+                    stop_reason = getattr(delta, "stop_reason", stop_reason)
+
+    if stop_reason != "tool_use" or not tool_use_blocks_acc:
+        return  # Normal completion, already streamed
+
+    # Reconstruct tool use blocks for history
+    reconstructed_content: list[dict] = []
+    if content_tokens:
+        reconstructed_content.append({"type": "text", "text": "".join(content_tokens)})
+    for tb in tool_use_blocks_acc.values():
+        try:
+            input_data = json.loads(tb["input_str"]) if tb["input_str"] else {}
+        except Exception:
+            input_data = {}
+        reconstructed_content.append({
+            "type": "tool_use",
+            "id": tb["id"],
+            "name": tb["name"],
+            "input": input_data,
+        })
+
+    updated_messages: list[dict] = list(chat_messages) + [
+        {"role": "assistant", "content": reconstructed_content}
+    ]
+
+    tool_results = []
+    for tb in tool_use_blocks_acc.values():
+        if tb["name"] == "web_search":
+            try:
+                input_data = json.loads(tb["input_str"]) if tb["input_str"] else {}
+            except Exception:
+                input_data = {}
+            query = input_data.get("query", "")
+            yield {"tool_call": "web_search", "query": query}
+
+            try:
+                from services.web_search import search as web_search_fn
+                result = await web_search_fn(
+                    query, max_results=10, include_content=False,
+                    exa_key=creds.get_exa(), tavily_key=creds.get_tavily(),
+                )
+                results_text = "\n\n".join(
+                    f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
+                    for i, r in enumerate(result.results[:10])
+                )
+                yield {"tool_result": True, "count": len(result.results)}
+            except Exception as exc:
+                results_text = f"Search failed: {exc}"
+                yield {"tool_result": True, "count": 0}
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": tb["id"],
+                "content": results_text,
+            })
+
+    updated_messages.append({"role": "user", "content": tool_results})
+
+    # Stream the final response
+    final_kwargs: dict = {
+        "model": model,
+        "max_tokens": 4096,
+        "messages": updated_messages,
+    }
+    if resolved_system:
+        final_kwargs["system"] = resolved_system
+
+    async with client.messages.stream(**final_kwargs) as final_stream:
+        async for text in final_stream.text_stream:
+            yield text
+
+
 async def stream_chat_with_tools(
     messages: list[dict],
     model: str,
@@ -608,16 +860,22 @@ async def stream_chat_with_tools(
         and ``{"tool_result": True, "count": N}``
       - ``str`` for text tokens
 
-    When ``enable_web_search=False`` (or provider is Ollama), delegates directly
-    to ``stream_chat``.
+    When ``enable_web_search=False``, delegates directly to ``stream_chat``.
+    Ollama does not support tool calling and always uses plain streaming.
     """
     if creds is None:
         creds = ProviderCredentials()
 
     p = Provider(provider)
 
+    # When web search is disabled, use plain streaming
+    if not enable_web_search:
+        async for token in stream_chat(messages, model, p, system_prompt, creds):
+            yield token
+        return
+
     # Ollama doesn't reliably support tool calling — fall back to plain streaming
-    if not enable_web_search or p == Provider.OLLAMA:
+    if p == Provider.OLLAMA:
         async for token in stream_chat(messages, model, p, system_prompt, creds):
             yield token
         return
@@ -643,163 +901,20 @@ async def stream_chat_with_tools(
             base_url=creds.get_gateway_url(),
         )
     else:
-        # Unexpected — fall back
+        # Unexpected provider — fall back to plain streaming
         async for token in stream_chat(messages, model, p, system_prompt, creds):
             yield token
         return
 
-    full_messages = _prepend_system(messages, system_prompt)
-
-    # First call — non-streaming to detect tool use
     try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=full_messages,  # type: ignore[arg-type]
-            tools=[WEB_SEARCH_TOOL_OPENAI],  # type: ignore[arg-type]
-            tool_choice="auto",
-            max_tokens=4096,
-        )
-        choice = response.choices[0]
+        async for item in _stream_with_tools_openai_compat(
+            messages, model, system_prompt, creds, client
+        ):
+            yield item
     except Exception as exc:
         log.warning("Tool calling not supported by %s/%s, falling back: %s", p, model, exc)
         async for token in stream_chat(messages, model, p, system_prompt, creds):
             yield token
-        return
-
-    if choice.finish_reason == "tool_calls":
-        tool_calls = choice.message.tool_calls or []
-
-        # Reconstruct assistant message with tool_calls for the history
-        messages_with_tools: list[dict] = list(full_messages) + [
-            {
-                "role": "assistant",
-                "content": choice.message.content,
-                "tool_calls": [tc.model_dump() for tc in tool_calls],
-            }
-        ]
-
-        for tc in tool_calls:
-            if tc.function.name == "web_search":
-                args = json.loads(tc.function.arguments)
-                query = args["query"]
-                yield {"tool_call": "web_search", "query": query}
-
-                try:
-                    from services.web_search import search as web_search_fn
-                    result = await web_search_fn(query, max_results=10, include_content=False, exa_key=creds.get_exa(), tavily_key=creds.get_tavily())
-                    results_text = "\n\n".join(
-                        f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
-                        for i, r in enumerate(result.results[:5])
-                    )
-                    yield {"tool_result": True, "count": len(result.results)}
-                except Exception as exc:
-                    results_text = f"Search failed: {exc}"
-                    yield {"tool_result": True, "count": 0}
-
-                messages_with_tools.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": results_text,
-                    }
-                )
-
-        # Second call — stream the final answer
-        stream = await client.chat.completions.create(
-            model=model,
-            messages=messages_with_tools,  # type: ignore[arg-type]
-            max_tokens=4096,
-            stream=True,
-        )
-        async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    else:
-        # No tool call — yield existing content as tokens
-        content = choice.message.content or ""
-        for char in content:
-            yield char
-
-
-async def _stream_with_tools_anthropic(
-    messages: list[dict],
-    model: str,
-    system_prompt: str | None,
-    creds: ProviderCredentials,
-) -> AsyncGenerator[str | dict, None]:
-    """Tool-calling loop for Anthropic provider."""
-    chat_messages = [m for m in messages if m["role"] != "system"]
-    embedded = next(
-        (m["content"] for m in messages if m["role"] == "system"), None
-    )
-    resolved_system = system_prompt or embedded
-
-    client = anthropic.AsyncAnthropic(api_key=creds.get_anthropic())
-    kwargs: dict = {
-        "model": model,
-        "max_tokens": 4096,
-        "messages": chat_messages,
-        "tools": [WEB_SEARCH_TOOL_ANTHROPIC],
-    }
-    if resolved_system:
-        kwargs["system"] = resolved_system
-
-    response = await client.messages.create(**kwargs)
-
-    # Check for tool use blocks
-    tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-
-    if response.stop_reason == "tool_use" and tool_use_blocks:
-        # Build updated message history with the assistant's tool_use turn
-        updated_messages = list(chat_messages) + [
-            {"role": "assistant", "content": response.content}
-        ]
-
-        tool_results = []
-        for block in tool_use_blocks:
-            if block.name == "web_search":
-                query = block.input.get("query", "")
-                yield {"tool_call": "web_search", "query": query}
-
-                try:
-                    from services.web_search import search as web_search_fn
-                    result = await web_search_fn(query, max_results=10, include_content=False, exa_key=creds.get_exa(), tavily_key=creds.get_tavily())
-                    results_text = "\n\n".join(
-                        f"[{i + 1}] {r.title}\n{r.url}\n{r.snippet}"
-                        for i, r in enumerate(result.results[:5])
-                    )
-                    yield {"tool_result": True, "count": len(result.results)}
-                except Exception as exc:
-                    results_text = f"Search failed: {exc}"
-                    yield {"tool_result": True, "count": 0}
-
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": results_text,
-                    }
-                )
-
-        updated_messages.append({"role": "user", "content": tool_results})
-
-        # Stream the final response
-        final_kwargs: dict = {
-            "model": model,
-            "max_tokens": 4096,
-            "messages": updated_messages,
-        }
-        if resolved_system:
-            final_kwargs["system"] = resolved_system
-
-        async with client.messages.stream(**final_kwargs) as stream:
-            async for text in stream.text_stream:
-                yield text
-    else:
-        # No tool use — yield text content from the response
-        for block in response.content:
-            if hasattr(block, "text"):
-                yield block.text
 
 
 async def complete_chat(

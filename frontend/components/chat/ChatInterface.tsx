@@ -55,6 +55,8 @@ export function ChatInterface() {
     useRag,
     useWebSearch,
     systemPrompt,
+    personalities,
+    activePersonalityId,
     addMessage,
     appendToLastMessage,
     finalizeLastMessage,
@@ -62,6 +64,13 @@ export function ChatInterface() {
     setIsStreaming,
     clearChat,
   } = useStore();
+
+  // Compute effective system prompt from active personality
+  const activePersonality = personalities?.find((p) => p.id === activePersonalityId);
+  const effectiveSystemPrompt =
+    activePersonality?.systemPrompt
+      ? activePersonality.systemPrompt
+      : systemPrompt || undefined;
 
   const [activeSearch, setActiveSearch] = useState<string | null>(null);
 
@@ -138,7 +147,7 @@ export function ChatInterface() {
           messages: apiMessages,
           model: selectedModel,
           provider: selectedProvider,
-          systemPrompt: systemPrompt || undefined,
+          systemPrompt: effectiveSystemPrompt,
           conversationId,
           useRag,
           useWebSearch,
@@ -179,7 +188,7 @@ export function ChatInterface() {
       conversationId,
       useRag,
       useWebSearch,
-      systemPrompt,
+      effectiveSystemPrompt,
       addMessage,
       appendToLastMessage,
       finalizeLastMessage,

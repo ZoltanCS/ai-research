@@ -66,8 +66,12 @@ Be concise but thorough. Use markdown formatting for structure when helpful.\
 """
 
 WEB_SEARCH_PROMPT_ADDON = (
-    "\n\nYou have access to a `web_search` tool. "
-    "Use it whenever the user's question would benefit from current or real-time information."
+    "\n\nYou have a `web_search` tool. Use it PROACTIVELY and AUTONOMOUSLY whenever:"
+    "\n- The question involves current events, recent data, prices, or news"
+    "\n- You're not fully certain about a fact and accuracy matters"
+    "\n- The user asks about something that may have changed recently"
+    "\n- More information would significantly improve your answer"
+    "\nDon't ask for permission — just search when it would help."
 )
 
 

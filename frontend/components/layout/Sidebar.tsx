@@ -11,6 +11,7 @@ import {
   Plus,
   Trash2,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import { useStore } from "@/store";
 import {
@@ -22,10 +23,11 @@ import {
 // ── Nav items ─────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { href: "/chat",      icon: MessageSquare, label: "Chat"      },
-  { href: "/research",  icon: Search,        label: "Research"  },
-  { href: "/documents", icon: FileText,      label: "Documents" },
-  { href: "/settings",  icon: Settings,      label: "Settings"  },
+  { href: "/chat",          icon: MessageSquare, label: "Chat"          },
+  { href: "/research",      icon: Search,        label: "Research"      },
+  { href: "/documents",     icon: FileText,      label: "Documents"     },
+  { href: "/personalities", icon: Sparkles,      label: "Personalities" },
+  { href: "/settings",      icon: Settings,      label: "Settings"      },
 ] as const;
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
