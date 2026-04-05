@@ -397,14 +397,15 @@ async def _stream_openai(
 ) -> AsyncGenerator[str, None]:
     full_messages = _prepend_system(messages, system_prompt)
     client = openai.AsyncOpenAI(api_key=creds.get_openai())
-    async with client.chat.completions.stream(
+    stream = await client.chat.completions.create(
         model=model,
         messages=full_messages,  # type: ignore[arg-type]
         max_tokens=4096,
-    ) as stream:
-        async for event in stream:
-            if event.choices and event.choices[0].delta.content:
-                yield event.choices[0].delta.content
+        stream=True,
+    )
+    async for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
 
 
 async def _stream_anthropic(
@@ -447,14 +448,15 @@ async def _stream_cerebras(
         api_key=creds.get_cerebras(),
         base_url="https://api.cerebras.ai/v1",
     )
-    async with client.chat.completions.stream(
+    stream = await client.chat.completions.create(
         model=model,
         messages=full_messages,  # type: ignore[arg-type]
         max_tokens=8192,
-    ) as stream:
-        async for event in stream:
-            if event.choices and event.choices[0].delta.content:
-                yield event.choices[0].delta.content
+        stream=True,
+    )
+    async for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
 
 
 async def _stream_vercel(
@@ -468,14 +470,15 @@ async def _stream_vercel(
         api_key=creds.get_vercel(),
         base_url=creds.get_gateway_url(),
     )
-    async with client.chat.completions.stream(
+    stream = await client.chat.completions.create(
         model=model,
         messages=full_messages,  # type: ignore[arg-type]
         max_tokens=4096,
-    ) as stream:
-        async for event in stream:
-            if event.choices and event.choices[0].delta.content:
-                yield event.choices[0].delta.content
+        stream=True,
+    )
+    async for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
 
 
 # ── Public interface ──────────────────────────────────────────────────────────
