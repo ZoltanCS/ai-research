@@ -429,7 +429,12 @@ export default function SettingsPage() {
           title="Providers & Models"
           description="Enter API keys to unlock providers. Keys are sent only to your local backend."
         >
-          {PROVIDER_CONFIG.map(({ key, label, Icon, isLocal, keyField, placeholder, hasGatewayUrl }) => {
+          {PROVIDER_CONFIG.map((cfg) => {
+            const { key, label, Icon } = cfg;
+            const isLocal = "isLocal" in cfg ? cfg.isLocal : false;
+            const keyField = "keyField" in cfg ? cfg.keyField : undefined;
+            const placeholder = "placeholder" in cfg ? cfg.placeholder : undefined;
+            const hasGatewayUrl = "hasGatewayUrl" in cfg ? cfg.hasGatewayUrl : false;
             const status = statuses[key];
             const fetchedModels = (allModels[key] ?? []) as ModelInfo[];
             const custom = customModels[key] ?? [];
