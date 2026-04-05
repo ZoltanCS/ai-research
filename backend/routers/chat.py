@@ -123,8 +123,8 @@ async def _augment_last_user_message(
             raw[last_user_idx]["content"] = (
                 f"Web search results:\n{context}\n\nUser question: {original_text}"
             )
-        except ValueError:
-            pass  # Tavily not configured — silently skip
+        except Exception:
+            pass  # Search unavailable — LLM tool calling will handle it if supported
 
     return raw
 

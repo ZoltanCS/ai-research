@@ -20,7 +20,7 @@ async def web_search(
     """Legacy wrapper returning the old SearchResponse schema."""
     try:
         resp: _NewSearchResponse = await _search(query, max_results)
-    except RuntimeError as exc:
+    except Exception as exc:
         raise ValueError(str(exc)) from exc
 
     return _LegacySearchResponse(
