@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import TopBar from "@/components/TopBar";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Toaster } from "sonner";
+import AuthGuard from "@/components/AuthGuard";
 
 export const metadata: Metadata = {
   title: "LocalMind",
@@ -29,13 +30,15 @@ export default function RootLayout({
       </head>
       <body className="font-sans bg-background text-foreground antialiased">
         <ThemeProvider>
-          <div className="flex h-screen overflow-hidden">
-            <Sidebar />
-            <div className="flex flex-1 flex-col min-w-0">
-              <TopBar />
-              <main className="flex-1 overflow-hidden">{children}</main>
+          <AuthGuard>
+            <div className="flex h-screen overflow-hidden">
+              <Sidebar />
+              <div className="flex flex-1 flex-col min-w-0">
+                <TopBar />
+                <main className="flex-1 overflow-hidden">{children}</main>
+              </div>
             </div>
-          </div>
+          </AuthGuard>
           <Toaster
             position="bottom-right"
             toastOptions={{

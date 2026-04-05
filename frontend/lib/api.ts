@@ -414,3 +414,73 @@ export async function webSearch(
   }
   return res.json();
 }
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export async function login(username: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail ?? "Login failed");
+  }
+  return res.json();
+}
+
+export async function register(username: string, email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail ?? "Registration failed");
+  }
+  return res.json();
+}
+
+// ── Admin settings ─────────────────────────────────────────────────────────────
+
+export interface AdminSettings {
+  openai_api_key: string;
+  anthropic_api_key: string;
+  cerebras_api_key: string;
+  vercel_api_token: string;
+  vercel_gateway_url: string;
+  ollama_host: string;
+}
+
+export async function getAdminSettings(): Promise<AdminSettings> {
+  const res = await fetch(`${API_BASE}/api/admin/settings`, { headers: credHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch admin settings");
+  return res.json();
+}
+
+export async function updateAdminSettings(settings: AdminSettings): Promise<AdminSettings> {
+  const res = await fetch(`${API_BASE}/api/admin/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error("Failed to update admin settings");
+  return res.json();
+}

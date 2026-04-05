@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Sun, Moon, Server, Zap, Brain, Cpu, Globe,
   Eye, EyeOff, Trash2, AlertTriangle, RefreshCw,
-  CheckCircle2, XCircle, Plus, X as XIcon,
+  CheckCircle2, XCircle, Plus, X as XIcon, ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useStore } from "@/store";
@@ -15,8 +15,11 @@ import {
   getDocuments,
   deleteDocument,
   getModels,
+  getAdminSettings,
+  updateAdminSettings,
   type ProviderStatus,
   type ModelInfo,
+  type AdminSettings,
 } from "@/lib/api";
 
 // ── Shared layout primitives ──────────────────────────────────────────────────
@@ -315,6 +318,90 @@ const PROVIDER_CONFIG = [
   },
 ] as const;
 
+// ── Admin settings section ────────────────────────────────────────────────────
+
+function AdminSettingsSection() {
+  const [settings, setAdminSettings] = useState<AdminSettings>({
+    openai_api_key: "",
+    anthropic_api_key: "",
+    cerebras_api_key: "",
+    vercel_api_token: "",
+    vercel_gateway_url: "",
+    ollama_host: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    getAdminSettings()
+      .then((s) => setAdminSettings(s))
+      .catch(() => toast.error("Failed to load admin settings"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateAdminSettings(settings);
+      toast.success("Admin settings saved");
+    } catch {
+      toast.error("Failed to save admin settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fields: { key: keyof AdminSettings; label: string; placeholder: string }[] = [
+    { key: "openai_api_key", label: "OpenAI API Key", placeholder: "sk-…" },
+    { key: "anthropic_api_key", label: "Anthropic API Key", placeholder: "sk-ant-…" },
+    { key: "cerebras_api_key", label: "Cerebras API Key", placeholder: "API key from cloud.cerebras.ai" },
+    { key: "vercel_api_token", label: "Vercel API Token", placeholder: "Vercel API token" },
+    { key: "vercel_gateway_url", label: "Vercel Gateway URL", placeholder: "https://ai-gateway.vercel.sh/v1" },
+    { key: "ollama_host", label: "Ollama Host", placeholder: "http://localhost:11434" },
+  ];
+
+  return (
+    <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-700/60 bg-zinc-800/40">
+        <ShieldCheck size={14} className="text-blue-400 flex-shrink-0" />
+        <span className="text-sm font-medium text-zinc-200 flex-1">Global API Keys</span>
+        <span className="text-[10px] font-semibold bg-blue-600/20 text-blue-400 border border-blue-500/30 rounded px-1.5 py-0.5">
+          Admin
+        </span>
+      </div>
+      <div className="px-4 py-4 space-y-3">
+        <p className="text-xs text-zinc-500">
+          These keys are stored in the database and used as fallbacks when users don&apos;t provide their own.
+        </p>
+        {loading ? (
+          <p className="text-xs text-zinc-600">Loading…</p>
+        ) : (
+          <div className="space-y-3">
+            {fields.map(({ key, label, placeholder }) => (
+              <div key={key} className="space-y-1">
+                <p className="text-xs text-zinc-500">{label}</p>
+                <ApiKeyInput
+                  value={settings[key]}
+                  onChange={(v) => setAdminSettings((prev) => ({ ...prev, [key]: v }))}
+                  placeholder={placeholder}
+                />
+              </div>
+            ))}
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              {saving ? "Saving…" : "Save global settings"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -333,6 +420,7 @@ export default function SettingsPage() {
     setProviderKey,
     addCustomModel,
     removeCustomModel,
+    authUser,
   } = useStore();
 
   const [statuses, setStatuses] = useState<Record<string, ProviderStatus>>({});
@@ -407,6 +495,16 @@ export default function SettingsPage() {
             Refresh
           </button>
         </div>
+
+        {/* ── Admin Settings ───────────────────────────────────────────────── */}
+        {authUser?.is_admin && (
+          <Section
+            title="Admin Settings"
+            description="Global configuration visible only to administrators."
+          >
+            <AdminSettingsSection />
+          </Section>
+        )}
 
         {/* ── Appearance ───────────────────────────────────────────────────── */}
         <Section title="Appearance">
