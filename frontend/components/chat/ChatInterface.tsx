@@ -111,7 +111,9 @@ export function ChatInterface() {
       // Snapshot existing messages BEFORE mutating store
       const existingMessages = useStore.getState().messages;
       const apiMessages = [
-        ...existingMessages.map((m) => ({ role: m.role, content: m.content })),
+        ...existingMessages
+          .filter((m) => m.content.trim() !== "")
+          .map((m) => ({ role: m.role, content: m.content })),
         { role: "user" as const, content: userMessage.content },
       ];
 
