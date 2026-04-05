@@ -2,116 +2,136 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
+  Brain,
   MessageSquare,
   Search,
   FileText,
   Plus,
   Trash2,
-  Brain,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { getConversations, deleteConversation, type Conversation } from "@/lib/api";
+import { useStore } from "@/store";
+import {
+  getConversations,
+  deleteConversation,
+  type Conversation,
+} from "@/lib/api";
+
+// ── Nav items ─────────────────────────────────────────────────────────────────
+
+const NAV_ITEMS = [
+  { href: "/chat",      icon: MessageSquare, label: "Chat"      },
+  { href: "/research",  icon: Search,        label: "Research"  },
+  { href: "/documents", icon: FileText,      label: "Documents" },
+] as const;
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
+  const { clearChat } = useStore();
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
+  // Refresh conversation list on every navigation
   useEffect(() => {
-    getConversations()
-      .then(setConversations)
-      .catch(() => {});
+    getConversations().then(setConversations).catch(console.error);
   }, [pathname]);
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
-    await deleteConversation(id);
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (pathname.includes(id)) router.push("/chat");
+    try {
+      await deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const navItems = [
-    { href: "/chat", icon: MessageSquare, label: "Chat" },
-    { href: "/research", icon: Search, label: "Research" },
-  ];
-
   return (
-    <aside className="w-64 border-r bg-muted/30 flex flex-col h-screen">
-      {/* Logo */}
-      <div className="p-4 border-b flex items-center gap-2">
-        <Brain className="h-6 w-6 text-primary" />
-        <span className="font-semibold text-lg">LocalMind</span>
+    <aside className="flex flex-col w-64 flex-shrink-0 h-full bg-[#111111] border-r border-zinc-800/80">
+      {/* ── Logo ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2.5 px-4 py-[13px] border-b border-zinc-800/80">
+        <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
+          <Brain size={15} className="text-white" />
+        </div>
+        <span className="font-semibold text-sm text-white tracking-tight">
+          LocalMind
+        </span>
       </div>
 
-      {/* Navigation */}
-      <nav className="p-2 space-y-1">
-        {navItems.map(({ href, icon: Icon, label }) => (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-              pathname.startsWith(href)
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            )}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </Link>
-        ))}
-      </nav>
-
-      <div className="px-2 mt-2">
+      {/* ── New chat ──────────────────────────────────────────────────────── */}
+      <div className="px-3 pt-3">
         <Link
           href="/chat"
-          className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm border border-dashed text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+          onClick={clearChat}
+          className="flex items-center gap-2 w-full px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
         >
-          <Plus className="h-4 w-4" />
-          New conversation
+          <Plus size={14} />
+          <span>New chat</span>
         </Link>
       </div>
 
-      {/* Conversations */}
-      <div className="flex-1 overflow-y-auto px-2 mt-4">
-        <p className="px-3 text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-          Recent
-        </p>
-        <div className="space-y-0.5">
-          {conversations.map((conv) => (
+      {/* ── Navigation ────────────────────────────────────────────────────── */}
+      <nav className="px-3 pt-1 space-y-0.5">
+        {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
+          const active =
+            pathname === href || pathname.startsWith(href + "/");
+          return (
             <Link
-              key={conv.id}
-              href={`/chat?id=${conv.id}`}
-              className={cn(
-                "group flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-                pathname.includes(conv.id)
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              )}
+              key={href}
+              href={href}
+              className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg transition-colors ${
+                active
+                  ? "bg-zinc-800 text-white"
+                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60"
+              }`}
             >
-              <MessageSquare className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1 truncate">{conv.title}</span>
-              <button
-                onClick={(e) => handleDelete(e, conv.id)}
-                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-destructive transition-all"
-                aria-label="Delete conversation"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
+              <Icon size={14} />
+              <span>{label}</span>
             </Link>
-          ))}
-        </div>
+          );
+        })}
+      </nav>
+
+      {/* ── Divider ───────────────────────────────────────────────────────── */}
+      <div className="mx-3 my-3 border-t border-zinc-800/60" />
+
+      {/* ── Recent conversations ──────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto px-3 space-y-0.5 min-h-0">
+        {conversations.length > 0 && (
+          <>
+            <p className="px-3 pb-1.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
+              Recent
+            </p>
+            {conversations.slice(0, 30).map((conv) => (
+              <div key={conv.id} className="group relative">
+                <Link
+                  href={`/chat?id=${conv.id}`}
+                  className="flex items-center px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 rounded-lg transition-colors"
+                >
+                  <span className="truncate pr-6">{conv.title}</span>
+                </Link>
+                <button
+                  onClick={(e) => handleDelete(e, conv.id)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded"
+                  title="Delete conversation"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
-      {/* Footer */}
-      <div className="p-3 border-t">
-        <p className="text-xs text-muted-foreground text-center">
-          LocalMind v0.1.0
-        </p>
+      {/* ── Footer ────────────────────────────────────────────────────────── */}
+      <div className="px-5 py-3 border-t border-zinc-800/60">
+        <p className="text-[11px] text-zinc-700">LocalMind v0.1.0</p>
       </div>
     </aside>
   );
 }
+
+export default Sidebar;

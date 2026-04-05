@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
-
-const inter = Inter({ subsets: ["latin"] });
+import TopBar from "@/components/TopBar";
 
 export const metadata: Metadata = {
   title: "LocalMind",
@@ -16,11 +14,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <div className="flex h-screen bg-background">
+    <html lang="en" className="dark">
+      <body
+        className="font-sans bg-background text-foreground antialiased"
+      >
+        <div className="flex h-screen overflow-hidden">
           <Sidebar />
-          <main className="flex-1 overflow-hidden">{children}</main>
+          <div className="flex flex-1 flex-col min-w-0">
+            <TopBar />
+            <main className="flex-1 overflow-hidden">{children}</main>
+          </div>
         </div>
       </body>
     </html>
