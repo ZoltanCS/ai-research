@@ -159,6 +159,9 @@ export async function streamChatMessage(params: {
           } else if (event.done === true) {
             params.onDone(event.conversation_id ?? null);
             return;
+          } else if (typeof event.error === "string") {
+            params.onError(event.error);
+            return;
           }
         } catch {
           // malformed JSON line — skip

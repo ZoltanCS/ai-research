@@ -427,7 +427,6 @@ async def _stream_anthropic(
         "model": model,
         "max_tokens": 4096,
         "messages": chat_messages,
-        "thinking": {"type": "adaptive"},
     }
     if resolved_system:
         kwargs["system"] = resolved_system
