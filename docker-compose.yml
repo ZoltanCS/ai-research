@@ -1,63 +1,121 @@
 services:
+
+  # ── Frontend ─────────────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: localmind-frontend
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+    networks:
+      - localmind
+    restart: unless-stopped
 
+  # ── Backend ──────────────────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: localmind-backend
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://localmind:localmind@postgres:5432/localmind
-      - REDIS_URL=redis://redis:6379
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # Override with Docker-internal hostnames (take precedence over .env values)
+      DATABASE_URL: postgresql+asyncpg://localmind:localmind@postgres:5432/localmind
+      REDIS_URL: redis://redis:6379
+      SEARXNG_HOST: http://searxng:8080
+      # Ollama runs on the Docker host.
+      # Docker Desktop (Mac/Windows): host.docker.internal resolves automatically.
+      # Linux: set OLLAMA_HOST=http://172.17.0.1:11434 in your .env file.
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      searxng:
         condition: service_started
-    volumes:
-      - ./backend:/app
+    networks:
+      - localmind
+    restart: unless-stopped
 
+  # ── PostgreSQL + pgvector ─────────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
+    container_name: localmind-postgres
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=localmind
-      - POSTGRES_PASSWORD=localmind
-      - POSTGRES_DB=localmind
+      POSTGRES_USER: localmind
+      POSTGRES_PASSWORD: localmind
+      POSTGRES_DB: localmind
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U localmind -d localmind"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 15s
+    networks:
+      - localmind
+    restart: unless-stopped
 
+  # ── Redis ─────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
+    container_name: localmind-redis
     ports:
       - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - localmind
+    restart: unless-stopped
 
+  # ── SearXNG (self-hosted web search fallback) ─────────────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: localmind-searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8080/}
+      SEARXNG_SECRET_KEY: ${SEARXNG_SECRET_KEY:-localmind-dev-secret-change-me}
+    # Drop unneeded Linux capabilities for security
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    networks:
+      - localmind
+    restart: unless-stopped
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  localmind:
+    driver: bridge

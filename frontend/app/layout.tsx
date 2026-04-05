@@ -3,6 +3,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 import TopBar from "@/components/TopBar";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "LocalMind",
@@ -35,6 +36,16 @@ export default function RootLayout({
               <main className="flex-1 overflow-hidden">{children}</main>
             </div>
           </div>
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: "#1c1c1c",
+                border: "1px solid #2a2a2a",
+                color: "#e4e4e7",
+              },
+            }}
+          />
         </ThemeProvider>
       </body>
     </html>

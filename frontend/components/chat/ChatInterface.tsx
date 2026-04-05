@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { Brain, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { useStore, type LocalMessage } from "@/store";
 import { streamChatMessage, getConversation } from "@/lib/api";
 import { MessageBubble } from "./MessageBubble";
@@ -145,6 +146,7 @@ export function ChatInterface() {
           onError: (err) => {
             appendToLastMessage(`\n\n⚠️ Error: ${err}`);
             finalizeLastMessage();
+            toast.error(err);
           },
           signal: abortRef.current.signal,
         });
@@ -154,6 +156,7 @@ export function ChatInterface() {
           const msg = e instanceof Error ? e.message : "Unknown error";
           appendToLastMessage(`\n\n⚠️ Error: ${msg}`);
           finalizeLastMessage();
+          toast.error(msg);
         }
       }
     },

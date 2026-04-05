@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -230,6 +231,7 @@ export default function ResearchPage() {
       } else if (event.type === "error") {
         setError(event.message);
         setPhase("error");
+        toast.error(`Research failed: ${event.message}`);
       }
     };
 
@@ -244,8 +246,10 @@ export default function ResearchPage() {
     } catch (e: unknown) {
       const name = e instanceof Error ? e.name : "";
       if (name !== "AbortError") {
-        setError(e instanceof Error ? e.message : "Unknown error");
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        setError(msg);
         setPhase("error");
+        toast.error(msg);
       }
     }
   }, [query, phase, effectiveModel, effectiveProvider]);

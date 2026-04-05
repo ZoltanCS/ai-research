@@ -184,24 +184,38 @@ async def _stream_ollama(
     system_prompt: str | None,
 ) -> AsyncGenerator[str, None]:
     full_messages = _prepend_system(messages, system_prompt)
-    async with httpx.AsyncClient(base_url=settings.ollama_host, timeout=120) as client:
-        async with client.stream(
-            "POST",
-            "/api/chat",
-            json={"model": model, "messages": full_messages, "stream": True},
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
+    try:
+        async with httpx.AsyncClient(base_url=settings.ollama_host, timeout=120) as client:
+            async with client.stream(
+                "POST",
+                "/api/chat",
+                json={"model": model, "messages": full_messages, "stream": True},
+            ) as response:
                 try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if content := data.get("message", {}).get("content"):
-                    yield content
-                if data.get("done"):
-                    break
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404:
+                        raise RuntimeError(
+                            f"Model '{model}' not found in Ollama. "
+                            f"Pull it first with: `ollama pull {model}`"
+                        ) from None
+                    raise
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if content := data.get("message", {}).get("content"):
+                        yield content
+                    if data.get("done"):
+                        break
+    except httpx.ConnectError:
+        raise RuntimeError(
+            f"Cannot connect to Ollama at {settings.ollama_host}. "
+            "Make sure Ollama is running (`ollama serve`) or switch to a cloud provider."
+        ) from None
 
 
 async def _stream_openai(

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
+import { toast } from "sonner";
 import {
   FileText,
   Upload,
@@ -146,6 +147,7 @@ export default function DocumentsPage() {
                     : u
                 )
               );
+              toast.error(`Upload failed: ${err.message}`);
             });
         })
       );
@@ -177,6 +179,7 @@ export default function DocumentsPage() {
       }
     } catch (err) {
       console.error(err);
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setDeletingId(null);
     }

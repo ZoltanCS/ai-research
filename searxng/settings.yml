@@ -1,0 +1,74 @@
+# LocalMind — SearXNG configuration
+# Full reference: https://docs.searxng.org/admin/settings/
+#
+# This file is mounted into the SearXNG container at /etc/searxng/settings.yml.
+# The SEARXNG_SECRET_KEY env var overrides the secret_key below.
+
+use_default_settings: true
+
+general:
+  instance_name: "LocalMind Search"
+  debug: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+server:
+  # Secret key — override with SEARXNG_SECRET_KEY env var in production
+  secret_key: "localmind-dev-secret-change-me"
+  limiter: false         # Disable rate limiting — this is a private local instance
+  image_proxy: false
+  port: 8080
+  bind_address: "0.0.0.0"
+  method: "GET"          # GET is slightly faster for API queries
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en-US"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json              # Required for LocalMind's web_search service
+
+ui:
+  static_use_hash: true
+  default_locale: "en"
+  theme_args:
+    simple_style: "dark"
+  infinite_scroll: false
+  default_theme: simple
+  center_alignment: false
+  cache_url: false
+
+# Enabled search engines — fast and reliable for API use
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    timeout: 3.0
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    timeout: 3.0
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    timeout: 3.0
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    timeout: 3.0
+    disabled: false
+
+enabled_plugins:
+  - Hash plugin
+  - Self Informations
+  - Tracker URL remover
