@@ -98,7 +98,9 @@ function ProfileCard() {
               {displayName}
             </span>
             {authUser.is_admin && (
-              <Shield size={10} className="text-amber-400 flex-shrink-0" title="Admin" />
+              <span title="Admin">
+                <Shield size={10} className="text-amber-400 flex-shrink-0" />
+              </span>
             )}
           </div>
           <p className="text-[10px] text-zinc-600 truncate">{authUser.email}</p>
