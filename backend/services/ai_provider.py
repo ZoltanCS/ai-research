@@ -942,3 +942,494 @@ def _prepend_system(
     # Replace any existing system turn rather than duplicating it
     filtered = [m for m in messages if m["role"] != "system"]
     return [{"role": "system", "content": system_prompt}, *filtered]
+
+
+# ── File tool definitions ─────────────────────────────────────────────────────
+
+FILE_TOOLS_OPENAI = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "List all files in the workspace. Returns a tree of files and directories.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read the contents of a file from the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Relative path to the file"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Create or overwrite a file in the workspace with the given content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path to the file"},
+                    "content": {"type": "string", "description": "File content to write"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "Delete a file or directory from the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Relative path to delete"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rename_file",
+            "description": "Rename or move a file within the workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "old_path": {"type": "string"},
+                    "new_path": {"type": "string"},
+                },
+                "required": ["old_path", "new_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_code",
+            "description": "Execute code in the workspace. Returns stdout, stderr, and exit code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Code to execute"},
+                    "language": {
+                        "type": "string",
+                        "enum": ["python", "javascript", "bash"],
+                        "description": "Programming language",
+                    },
+                },
+                "required": ["code", "language"],
+            },
+        },
+    },
+]
+
+FILE_TOOLS_ANTHROPIC = [
+    {
+        "name": "list_files",
+        "description": "List all files in the workspace.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "read_file",
+        "description": "Read the contents of a file from the workspace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Relative path to the file"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": "Create or overwrite a file in the workspace with the given content.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "delete_file",
+        "description": "Delete a file or directory from the workspace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "rename_file",
+        "description": "Rename or move a file within the workspace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"old_path": {"type": "string"}, "new_path": {"type": "string"}},
+            "required": ["old_path", "new_path"],
+        },
+    },
+    {
+        "name": "execute_code",
+        "description": "Execute code in the workspace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string"},
+                "language": {"type": "string", "enum": ["python", "javascript", "bash"]},
+            },
+            "required": ["code", "language"],
+        },
+    },
+]
+
+
+async def _execute_file_tool(name: str, args: dict, workspace_root: "Path") -> str:
+    """Execute a file-system or code-execution tool and return a string result."""
+    from pathlib import Path as _Path
+
+    def safe(rel: str) -> _Path:
+        clean = _Path(rel).as_posix().lstrip("/")
+        resolved = (workspace_root / clean).resolve()
+        if not str(resolved).startswith(str(workspace_root.resolve())):
+            raise ValueError("Path escapes workspace")
+        return resolved
+
+    if name == "list_files":
+        def walk(p: _Path) -> dict:
+            if p.is_dir():
+                return {
+                    "type": "dir",
+                    "name": p.name,
+                    "children": sorted(
+                        [walk(c) for c in p.iterdir()],
+                        key=lambda x: (x["type"] == "file", x["name"]),
+                    ),
+                }
+            return {"type": "file", "name": p.name, "size": p.stat().st_size}
+        tree = walk(workspace_root)
+        return json.dumps(tree.get("children", []), indent=2)
+
+    elif name == "read_file":
+        p = safe(args.get("path", ""))
+        if not p.exists():
+            return f"Error: File not found: {args.get('path')}"
+        return p.read_text(encoding="utf-8", errors="replace")
+
+    elif name == "write_file":
+        p = safe(args.get("path", ""))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(args.get("content", ""), encoding="utf-8")
+        return f"Written {p.stat().st_size} bytes to {args.get('path')}"
+
+    elif name == "delete_file":
+        import shutil as _shutil
+        p = safe(args.get("path", ""))
+        if not p.exists():
+            return f"Error: Not found: {args.get('path')}"
+        if p.is_dir():
+            _shutil.rmtree(p)
+        else:
+            p.unlink()
+        return f"Deleted {args.get('path')}"
+
+    elif name == "rename_file":
+        src = safe(args.get("old_path", ""))
+        dst = safe(args.get("new_path", ""))
+        if not src.exists():
+            return f"Error: Not found: {args.get('old_path')}"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+        return f"Renamed {args.get('old_path')} \u2192 {args.get('new_path')}"
+
+    elif name == "execute_code":
+        import os as _os
+        import tempfile as _tmpfile
+
+        code = args.get("code", "")
+        language = args.get("language", "python")
+
+        ext = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".txt")
+        cmd = {
+            "python": ["python3"],
+            "javascript": ["node"],
+            "bash": ["bash"],
+        }.get(language, ["cat"])
+
+        with _tmpfile.NamedTemporaryFile(
+            mode="w", suffix=ext, delete=False, encoding="utf-8"
+        ) as f:
+            f.write(code)
+            tmpfile = f.name
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, tmpfile,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(workspace_root),
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+                return "Error: Execution timed out after 30s"
+            out = stdout.decode("utf-8", errors="replace")
+            err = stderr.decode("utf-8", errors="replace")
+            code_status = proc.returncode
+            result_parts = []
+            if out:
+                result_parts.append(f"stdout:\n{out}")
+            if err:
+                result_parts.append(f"stderr:\n{err}")
+            result_parts.append(f"exit code: {code_status}")
+            return "\n".join(result_parts)
+        finally:
+            try:
+                _os.unlink(tmpfile)
+            except OSError:
+                pass
+    else:
+        return f"Unknown tool: {name}"
+
+
+async def stream_chat_with_file_tools(
+    messages: list[dict],
+    model: str,
+    provider: "Provider | str",
+    system_prompt: str | None = None,
+    creds: "ProviderCredentials | None" = None,
+    workspace_root: "object | None" = None,
+) -> AsyncGenerator[str | dict, None]:
+    """Agentic streaming chat with file system and code execution tools.
+
+    Runs a multi-turn tool calling loop: the AI can call file tools multiple
+    times until it finishes, yielding tokens and tool events throughout.
+
+    Yields:
+      - str tokens
+      - dict tool events: {"tool_call": name, "args": {...}}
+                          {"tool_result": name, "result": "..."}
+    """
+    from pathlib import Path as _Path
+    if creds is None:
+        creds = ProviderCredentials()
+    if workspace_root is None:
+        workspace_root = _Path("/workspace")
+
+    p = Provider(provider)
+
+    # Ollama: no tool support, fall back to plain streaming
+    if p == Provider.OLLAMA:
+        async for token in stream_chat(messages, model, p, system_prompt, creds):
+            yield token
+        return
+
+    LABS_SYSTEM = """You are an expert AI coding assistant in LocalMind Labs.
+You have access to a workspace where you can create, read, edit, and delete files,
+and execute code (Python, JavaScript, Bash).
+
+Be proactive: when asked to build something, actually CREATE the files.
+When asked to run code, actually EXECUTE it and report results.
+Use tools autonomously — don't ask permission, just do it.
+After writing files, execute them to verify they work correctly.
+Be thorough and complete tasks end-to-end."""
+
+    resolved_system = system_prompt or LABS_SYSTEM
+
+    # Agentic loop — run up to 10 tool-call rounds
+    current_messages = list(messages)
+    MAX_ROUNDS = 10
+
+    if p == Provider.ANTHROPIC:
+        # Anthropic agentic loop
+        client = anthropic.AsyncAnthropic(api_key=creds.get_anthropic())
+        chat_messages = [m for m in current_messages if m["role"] != "system"]
+
+        for _round in range(MAX_ROUNDS):
+            tool_use_blocks_acc: dict[int, dict] = {}
+            content_tokens: list[str] = []
+            stop_reason = None
+
+            stream_kwargs: dict = {
+                "model": model,
+                "max_tokens": 8192,
+                "messages": chat_messages,
+                "tools": FILE_TOOLS_ANTHROPIC,
+                "system": resolved_system,
+            }
+
+            try:
+                async with client.messages.stream(**stream_kwargs) as stream:
+                    async for event in stream:
+                        event_type = getattr(event, "type", None)
+
+                        if event_type == "content_block_start":
+                            block = getattr(event, "content_block", None)
+                            if block and getattr(block, "type", None) == "tool_use":
+                                idx = getattr(event, "index", 0)
+                                tool_use_blocks_acc[idx] = {
+                                    "id": getattr(block, "id", ""),
+                                    "name": getattr(block, "name", ""),
+                                    "input_str": "",
+                                }
+                        elif event_type == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if delta:
+                                delta_type = getattr(delta, "type", None)
+                                if delta_type == "text_delta":
+                                    text = getattr(delta, "text", "")
+                                    if text:
+                                        content_tokens.append(text)
+                                        yield text
+                                elif delta_type == "input_json_delta":
+                                    idx = getattr(event, "index", 0)
+                                    partial = getattr(delta, "partial_json", "")
+                                    if idx in tool_use_blocks_acc and partial:
+                                        tool_use_blocks_acc[idx]["input_str"] += partial
+                        elif event_type == "message_delta":
+                            delta = getattr(event, "delta", None)
+                            if delta:
+                                stop_reason = getattr(delta, "stop_reason", stop_reason)
+            except Exception as exc:
+                log.warning("Anthropic file tools error: %s", exc)
+                yield f"\n\nError: {exc}"
+                return
+
+            if stop_reason != "tool_use" or not tool_use_blocks_acc:
+                break  # Done
+
+            # Build assistant message with tool use blocks
+            reconstructed: list[dict] = []
+            if content_tokens:
+                reconstructed.append({"type": "text", "text": "".join(content_tokens)})
+            for tb in tool_use_blocks_acc.values():
+                try:
+                    input_data = json.loads(tb["input_str"]) if tb["input_str"] else {}
+                except Exception:
+                    input_data = {}
+                reconstructed.append({
+                    "type": "tool_use",
+                    "id": tb["id"],
+                    "name": tb["name"],
+                    "input": input_data,
+                })
+            chat_messages = list(chat_messages) + [{"role": "assistant", "content": reconstructed}]
+
+            # Execute tools and collect results
+            tool_results = []
+            for tb in tool_use_blocks_acc.values():
+                try:
+                    input_data = json.loads(tb["input_str"]) if tb["input_str"] else {}
+                except Exception:
+                    input_data = {}
+                yield {"tool_call": tb["name"], "args": input_data}
+                result = await _execute_file_tool(tb["name"], input_data, workspace_root)
+                yield {"tool_result": tb["name"], "result": result[:500]}
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tb["id"],
+                    "content": result,
+                })
+            chat_messages.append({"role": "user", "content": tool_results})
+
+    else:
+        # OpenAI-compatible agentic loop (OpenAI, Cerebras, Vercel)
+        if p == Provider.OPENAI:
+            client = openai.AsyncOpenAI(api_key=creds.get_openai())
+        elif p == Provider.CEREBRAS:
+            client = openai.AsyncOpenAI(
+                api_key=creds.get_cerebras(),
+                base_url="https://api.cerebras.ai/v1",
+            )
+        elif p == Provider.VERCEL:
+            client = openai.AsyncOpenAI(
+                api_key=creds.get_vercel(),
+                base_url=creds.get_gateway_url(),
+            )
+        else:
+            async for token in stream_chat(messages, model, p, system_prompt, creds):
+                yield token
+            return
+
+        full_messages = _prepend_system(current_messages, resolved_system)
+
+        for _round in range(MAX_ROUNDS):
+            tool_calls_acc: dict[int, dict] = {}
+            content_tokens: list[str] = []
+            finish_reason = None
+
+            try:
+                stream = await client.chat.completions.create(
+                    model=model,
+                    messages=full_messages,  # type: ignore[arg-type]
+                    tools=FILE_TOOLS_OPENAI,  # type: ignore[arg-type]
+                    tool_choice="auto",
+                    max_tokens=8192,
+                    stream=True,
+                )
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+                    delta = choice.delta
+                    if delta.content:
+                        content_tokens.append(delta.content)
+                        yield delta.content
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_calls_acc:
+                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc_delta.id:
+                                tool_calls_acc[idx]["id"] += tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    tool_calls_acc[idx]["name"] += tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    tool_calls_acc[idx]["arguments"] += tc_delta.function.arguments
+            except Exception as exc:
+                log.warning("OpenAI file tools error: %s", exc)
+                yield f"\n\nError: {exc}"
+                return
+
+            if finish_reason != "tool_calls" or not tool_calls_acc:
+                break  # Done
+
+            # Append assistant's turn with tool calls
+            full_messages = list(full_messages) + [
+                {
+                    "role": "assistant",
+                    "content": "".join(content_tokens) or None,
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                        }
+                        for tc in tool_calls_acc.values()
+                    ],
+                }
+            ]
+
+            # Execute tools
+            for tc in tool_calls_acc.values():
+                try:
+                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except Exception:
+                    args = {}
+                yield {"tool_call": tc["name"], "args": args}
+                result = await _execute_file_tool(tc["name"], args, workspace_root)
+                yield {"tool_result": tc["name"], "result": result[:500]}
+                full_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result,
+                })

@@ -39,6 +39,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - workspace_data:/workspace
     networks:
       - localmind
     restart: unless-stopped
@@ -88,6 +90,8 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  workspace_data:
     driver: local
 
 # ── Networks ──────────────────────────────────────────────────────────────────

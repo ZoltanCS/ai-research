@@ -510,6 +510,148 @@ export async function updateAdminSettings(settings: AdminSettings): Promise<Admi
 
 // ── Personalities ──────────────────────────────────────────────────────────────
 
+// ── Labs ──────────────────────────────────────────────────────────────────────
+
+export interface FileNode {
+  type: "file" | "directory";
+  name: string;
+  path: string;
+  size?: number;
+  children?: FileNode[];
+}
+
+export interface ExecuteResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+}
+
+export interface LabsToolEvent {
+  type: "tool_call" | "tool_result";
+  name: string;
+  args?: Record<string, unknown>;
+  result?: string;
+}
+
+export async function labsListFiles(): Promise<FileNode[]> {
+  const res = await fetch(`${API_BASE}/api/labs/files`, { headers: credHeaders() });
+  if (!res.ok) throw new Error("Failed to list files");
+  const data = await res.json();
+  return data.files;
+}
+
+export async function labsReadFile(path: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/labs/files/${path}`, { headers: credHeaders() });
+  if (!res.ok) throw new Error(`Failed to read ${path}`);
+  const data = await res.json();
+  return data.content;
+}
+
+export async function labsWriteFile(path: string, content: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/labs/files`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify({ path, content }),
+  });
+  if (!res.ok) throw new Error(`Failed to write ${path}`);
+}
+
+export async function labsDeleteFile(path: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/labs/files/${path}`, {
+    method: "DELETE",
+    headers: credHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to delete ${path}`);
+}
+
+export async function labsRenameFile(oldPath: string, newPath: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/labs/files`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify({ old_path: oldPath, new_path: newPath }),
+  });
+  if (!res.ok) throw new Error(`Failed to rename ${oldPath}`);
+}
+
+export async function labsExecute(code: string, language: string): Promise<ExecuteResult> {
+  const res = await fetch(`${API_BASE}/api/labs/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify({ code, language }),
+  });
+  if (!res.ok) throw new Error("Execution failed");
+  return res.json();
+}
+
+export async function streamLabsChat(params: {
+  messages: Array<{ role: string; content: string }>;
+  model: string;
+  provider: string;
+  systemPrompt?: string;
+  onToken: (token: string) => void;
+  onDone: () => void;
+  onError: (err: string) => void;
+  onToolEvent?: (event: LabsToolEvent) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/labs/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify({
+      messages: params.messages,
+      model: params.model,
+      provider: params.provider,
+      system_prompt: params.systemPrompt ?? null,
+    }),
+    signal: params.signal,
+  });
+
+  if (!response.ok) {
+    params.onError(await response.text());
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        try {
+          const event = JSON.parse(raw);
+          if (typeof event.delta === "string") {
+            params.onToken(event.delta);
+          } else if (event.done === true) {
+            params.onDone();
+            return;
+          } else if (typeof event.error === "string") {
+            params.onError(event.error);
+            return;
+          } else if (event.tool_call) {
+            params.onToolEvent?.({ type: "tool_call", name: event.tool_call, args: event.args });
+          } else if (event.tool_result) {
+            params.onToolEvent?.({ type: "tool_result", name: event.tool_result, result: event.result });
+          }
+        } catch { /* skip */ }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ── Personalities ──────────────────────────────────────────────────────────────
+
 export async function generatePersonalityPrompt(params: {
   name: string;
   description: string;

@@ -9,7 +9,7 @@ from sqlalchemy import text
 from core.config import settings
 from core.database import engine
 from models.database import Base
-from routers import auth, admin, chat, documents, models, rag, research, search, personalities as personalities_router
+from routers import auth, admin, chat, documents, labs as labs_router, models, rag, research, search, personalities as personalities_router
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ app.include_router(models.router,    prefix="/api",           tags=["models"])
 app.include_router(auth.router,  prefix="/api/auth",  tags=["auth"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(personalities_router.router, prefix="/api/personalities", tags=["personalities"])
+app.include_router(labs_router.router,          prefix="/api/labs",          tags=["labs"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 

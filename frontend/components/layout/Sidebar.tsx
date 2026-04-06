@@ -12,6 +12,7 @@ import {
   Trash2,
   Settings,
   Sparkles,
+  FlaskConical,
 } from "lucide-react";
 import { useStore } from "@/store";
 import {
@@ -23,11 +24,12 @@ import {
 // ── Nav items ─────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { href: "/chat",          icon: MessageSquare, label: "Chat"          },
-  { href: "/research",      icon: Search,        label: "Research"      },
-  { href: "/documents",     icon: FileText,      label: "Documents"     },
-  { href: "/personalities", icon: Sparkles,      label: "Personalities" },
-  { href: "/settings",      icon: Settings,      label: "Settings"      },
+  { href: "/chat",          icon: MessageSquare,  label: "Chat"          },
+  { href: "/research",      icon: Search,         label: "Research"      },
+  { href: "/labs",          icon: FlaskConical,   label: "Labs"          },
+  { href: "/documents",     icon: FileText,       label: "Documents"     },
+  { href: "/personalities", icon: Sparkles,       label: "Personalities" },
+  { href: "/settings",      icon: Settings,       label: "Settings"      },
 ] as const;
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
