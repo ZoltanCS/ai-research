@@ -1,4 +1,4 @@
-import { AuthGuard } from "@/components/AuthGuard";
+import AuthGuard from "@/components/AuthGuard";
 import LabsPage from "@/components/labs/LabsPage";
 
 export default function Labs() {
