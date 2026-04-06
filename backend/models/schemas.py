@@ -288,6 +288,9 @@ class UserOut(BaseModel):
     id: uuid.UUID
     username: str
     email: str
+    display_name: str | None = None
+    bio: str | None = None
+    avatar_data: str | None = None
     is_admin: bool
     is_active: bool
     created_at: datetime
@@ -299,6 +302,19 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: str | None = Field(None, max_length=100)
+    bio: str | None = Field(None, max_length=500)
+    avatar_data: str | None = None  # base64 data URI
+    email: str | None = Field(None, max_length=255)
+    username: str | None = Field(None, min_length=3, max_length=50)
+
+
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
 
 
 # ── Admin settings ────────────────────────────────────────────────────────────

@@ -438,6 +438,9 @@ export interface AuthUser {
   id: string;
   username: string;
   email: string;
+  display_name: string | null;
+  bio: string | null;
+  avatar_data: string | null;
   is_admin: boolean;
   is_active: boolean;
   created_at: string;
@@ -447,6 +450,45 @@ export interface AuthResponse {
   access_token: string;
   token_type: string;
   user: AuthUser;
+}
+
+export async function getMe(): Promise<AuthUser> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, { headers: credHeaders() });
+  if (!res.ok) throw new Error("Not authenticated");
+  return res.json();
+}
+
+export interface ProfileUpdate {
+  display_name?: string | null;
+  bio?: string | null;
+  avatar_data?: string | null;
+  email?: string | null;
+  username?: string | null;
+}
+
+export async function updateProfile(updates: ProfileUpdate): Promise<AuthUser> {
+  const res = await fetch(`${API_BASE}/api/auth/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail ?? "Failed to update profile");
+  }
+  return res.json();
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/auth/password`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...credHeaders() },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail ?? "Failed to change password");
+  }
 }
 
 export async function login(username: string, password: string): Promise<AuthResponse> {

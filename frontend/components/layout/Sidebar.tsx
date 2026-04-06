@@ -13,6 +13,9 @@ import {
   Settings,
   Sparkles,
   FlaskConical,
+  Shield,
+  User,
+  LogOut,
 } from "lucide-react";
 import { useStore } from "@/store";
 import {
@@ -31,6 +34,88 @@ const NAV_ITEMS = [
   { href: "/personalities", icon: Sparkles,       label: "Personalities" },
   { href: "/settings",      icon: Settings,       label: "Settings"      },
 ] as const;
+
+// ── Profile card ──────────────────────────────────────────────────────────────
+
+function ProfileCard() {
+  const { authUser, clearAuth } = useStore();
+  const pathname = usePathname();
+
+  if (!authUser) return null;
+
+  const avatarData = authUser.avatar_data;
+  const displayName = authUser.display_name || authUser.username;
+  const isOnProfile = pathname === "/profile";
+
+  // Render avatar
+  let avatar: React.ReactNode;
+  if (avatarData?.startsWith("data:image")) {
+    avatar = (
+      <img
+        src={avatarData}
+        alt="Avatar"
+        className="w-8 h-8 rounded-full object-cover ring-1 ring-zinc-700"
+      />
+    );
+  } else if (avatarData && avatarData.length <= 4) {
+    // emoji
+    avatar = (
+      <div className="w-8 h-8 rounded-full bg-zinc-800 ring-1 ring-zinc-700 flex items-center justify-center text-base">
+        {avatarData}
+      </div>
+    );
+  } else {
+    // initials
+    const initials = displayName
+      .split(" ")
+      .map((w: string) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+    avatar = (
+      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 ring-1 ring-zinc-700 flex items-center justify-center text-xs font-bold text-white">
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-2 border-t border-zinc-800/60">
+      <div
+        className={`flex items-center gap-2.5 px-2 py-2 rounded-xl transition-colors ${
+          isOnProfile ? "bg-zinc-800" : "hover:bg-zinc-800/60"
+        }`}
+      >
+        {/* Avatar → links to profile */}
+        <Link href="/profile" className="flex-shrink-0" title="Edit profile">
+          {avatar}
+        </Link>
+
+        {/* Name + role */}
+        <Link href="/profile" className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-xs font-medium text-zinc-200 truncate">
+              {displayName}
+            </span>
+            {authUser.is_admin && (
+              <Shield size={10} className="text-amber-400 flex-shrink-0" title="Admin" />
+            )}
+          </div>
+          <p className="text-[10px] text-zinc-600 truncate">{authUser.email}</p>
+        </Link>
+
+        {/* Sign out */}
+        <button
+          onClick={clearAuth}
+          title="Sign out"
+          className="flex-shrink-0 p-1 text-zinc-600 hover:text-red-400 rounded transition-colors"
+        >
+          <LogOut size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
@@ -132,10 +217,8 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* ── Footer ────────────────────────────────────────────────────────── */}
-      <div className="px-5 py-3 border-t border-zinc-800/60">
-        <p className="text-[11px] text-zinc-700">LocalMind v0.1.0</p>
-      </div>
+      {/* ── Profile card (replaces old footer) ────────────────────────────── */}
+      <ProfileCard />
     </aside>
   );
 }

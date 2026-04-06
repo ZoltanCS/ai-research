@@ -59,7 +59,15 @@ interface PersistedSettings {
   defaultResearchProvider: ProviderKey;
   // Auth
   authToken: string | null;
-  authUser: { id: string; username: string; email: string; is_admin: boolean } | null;
+  authUser: {
+    id: string;
+    username: string;
+    email: string;
+    display_name: string | null;
+    bio: string | null;
+    avatar_data: string | null;
+    is_admin: boolean;
+  } | null;
   // Personalities
   personalities: Personality[];
   activePersonalityId: string | null;
@@ -87,7 +95,8 @@ interface StoreState extends PersistedSettings {
   ) => void;
   addCustomModel: (provider: string, modelId: string) => void;
   removeCustomModel: (provider: string, modelId: string) => void;
-  setAuth: (token: string, user: { id: string; username: string; email: string; is_admin: boolean }) => void;
+  setAuth: (token: string, user: { id: string; username: string; email: string; display_name: string | null; bio: string | null; avatar_data: string | null; is_admin: boolean }) => void;
+  updateAuthUser: (updates: Partial<{ username: string; email: string; display_name: string | null; bio: string | null; avatar_data: string | null }>) => void;
   clearAuth: () => void;
   // Personality actions
   addPersonality: (p: Personality) => void;
@@ -271,6 +280,10 @@ export const useStore = create<StoreState>()(
         })),
 
       setAuth: (token, user) => set({ authToken: token, authUser: user }),
+      updateAuthUser: (updates) =>
+        set((state) =>
+          state.authUser ? { authUser: { ...state.authUser, ...updates } } : {}
+        ),
       clearAuth: () => set({ authToken: null, authUser: null }),
 
       addPersonality: (p) =>
