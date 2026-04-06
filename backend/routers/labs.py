@@ -3,13 +3,14 @@
 import asyncio
 import json
 import logging
+import mimetypes
 import os
 import shutil
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from services.ai_provider import ProviderCredentials, stream_chat_with_file_tools
@@ -103,6 +104,43 @@ async def delete_file(path: str):
     else:
         p.unlink()
     return {"deleted": path}
+
+
+# ── Static file preview server ─────────────────────────────────────────────────
+
+@router.get("/preview/{path:path}")
+async def preview_file(path: str):
+    """Serve any workspace file with correct MIME type for full-project preview.
+
+    The browser iframe points to this endpoint so relative links
+    (<link href="style.css">, <script src="app.js">, <img src="...">) all
+    resolve to sibling paths under /api/labs/preview/ — the full project
+    loads as if served by a real web server.
+    """
+    p = _safe_path(path)
+
+    # Auto-serve index.html when a directory is requested
+    if p.is_dir():
+        candidate = p / "index.html"
+        if candidate.exists():
+            p = candidate
+        else:
+            html_files = sorted(p.glob("*.html"))
+            if html_files:
+                p = html_files[0]
+            else:
+                raise HTTPException(404, "No index.html found in directory")
+
+    if not p.exists():
+        raise HTTPException(404, f"Not found: {path}")
+
+    content = p.read_bytes()
+    mime, _ = mimetypes.guess_type(str(p))
+    return Response(
+        content=content,
+        media_type=mime or "application/octet-stream",
+        headers={"Cache-Control": "no-cache, no-store"},
+    )
 
 
 # ── Code execution ───────────────────────────────────────────────────────────

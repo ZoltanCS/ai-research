@@ -44,6 +44,21 @@ import {
   type LabsToolEvent,
 } from "@/lib/api";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Recursively collect all files matching an extension from the file tree. */
+function collectByExt(nodes: FileNode[], ext: string): string[] {
+  const result: string[] = [];
+  for (const node of nodes) {
+    if (node.type === "file" && node.name.toLowerCase().endsWith(ext)) {
+      result.push(node.path);
+    } else if (node.type === "directory" && node.children) {
+      result.push(...collectByExt(node.children, ext));
+    }
+  }
+  return result;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function langFromExt(name: string): string {
@@ -648,8 +663,14 @@ export default function LabsPage() {
   const [activeTab, setActiveTab] = useState<TabId>("code");
   const [execResult, setExecResult] = useState<{ stdout: string; stderr: string; exit_code: number } | null>(null);
   const [running, setRunning] = useState(false);
+  // Full-project preview
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState(0); // bump to force iframe reload
 
   const isDirty = fileContent !== savedContent;
+
+  // Derive HTML files list from workspace tree
+  const htmlFiles = collectByExt(files, ".html");
 
   // ── File ops ────────────────────────────────────────────────────────────────
 
@@ -666,6 +687,13 @@ export default function LabsPage() {
     refreshFiles();
   }, [refreshFiles]);
 
+  // Auto-pick first HTML file as preview entry when workspace loads
+  useEffect(() => {
+    if (!previewFile && htmlFiles.length > 0) {
+      setPreviewFile(htmlFiles[0]);
+    }
+  }, [htmlFiles, previewFile]);
+
   const openFile = useCallback(async (path: string) => {
     try {
       const content = await labsReadFile(path);
@@ -673,6 +701,10 @@ export default function LabsPage() {
       setFileContent(content);
       setSavedContent(content);
       setActiveTab("code");
+      // Auto-select as preview entry point if it's an HTML file
+      if (path.toLowerCase().endsWith(".html")) {
+        setPreviewFile(path);
+      }
     } catch (e) {
       toast.error(`Failed to open ${path}`);
     }
@@ -685,6 +717,8 @@ export default function LabsPage() {
       setSavedContent(fileContent);
       toast.success(`Saved ${activeFile}`);
       await refreshFiles();
+      // Bump preview key so iframe reloads with latest files
+      setPreviewKey((k) => k + 1);
     } catch {
       toast.error("Save failed");
     }
@@ -800,23 +834,58 @@ export default function LabsPage() {
           )}
 
           {activeTab === "preview" && (
-            <div className="h-full bg-white overflow-hidden">
-              {activeFile && canPreview(activeFile) ? (
+            <div className="h-full flex flex-col bg-[#0a0a0a]">
+              {/* Preview toolbar */}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 flex-shrink-0">
+                <Globe size={11} className="text-zinc-500 flex-shrink-0" />
+                {/* Entry-point file selector */}
+                {htmlFiles.length > 1 ? (
+                  <select
+                    value={previewFile ?? ""}
+                    onChange={(e) => {
+                      setPreviewFile(e.target.value || null);
+                      setPreviewKey((k) => k + 1);
+                    }}
+                    className="flex-1 text-[11px] font-mono bg-zinc-950 border border-zinc-800 text-zinc-300 rounded px-2 py-0.5 focus:outline-none focus:border-zinc-600"
+                  >
+                    <option value="">— select HTML file —</option>
+                    {htmlFiles.map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="flex-1 text-[11px] font-mono text-zinc-500 truncate">
+                    {previewFile ?? (htmlFiles[0] ? (htmlFiles[0]) : "No HTML file in workspace")}
+                  </span>
+                )}
+                <button
+                  onClick={() => {
+                    // Auto-pick if none selected yet
+                    if (!previewFile && htmlFiles.length > 0) setPreviewFile(htmlFiles[0]);
+                    setPreviewKey((k) => k + 1);
+                  }}
+                  title="Refresh preview"
+                  className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors flex-shrink-0"
+                >
+                  <RefreshCw size={10} />
+                  Reload
+                </button>
+              </div>
+
+              {/* iframe — loads full project via backend static server */}
+              {(previewFile || htmlFiles.length > 0) ? (
                 <iframe
-                  key={savedContent}
-                  srcDoc={savedContent || fileContent}
-                  sandbox="allow-scripts"
-                  className="w-full h-full border-none"
-                  title="Preview"
+                  key={previewKey}
+                  src={`${API_BASE}/api/labs/preview/${previewFile ?? htmlFiles[0]}`}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                  className="flex-1 w-full border-none bg-white"
+                  title="Project preview"
                 />
               ) : (
-                <div className="flex items-center justify-center h-full bg-[#0a0a0a] text-zinc-600 text-sm gap-2">
-                  <Globe size={16} />
-                  <span>
-                    {activeFile
-                      ? "Preview available for HTML/SVG files"
-                      : "No file selected"}
-                  </span>
+                <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 gap-3">
+                  <Globe size={24} className="opacity-30" />
+                  <p className="text-sm">No HTML files in workspace yet.</p>
+                  <p className="text-xs text-zinc-700">Create an <code className="font-mono">index.html</code> and Save — then reload preview.</p>
                 </div>
               )}
             </div>
