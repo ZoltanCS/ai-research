@@ -15,13 +15,6 @@ Run powerful AI models on your own hardware — or connect to OpenAI / Anthropic
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
 
----
-
-> **Screenshot placeholder** — add `docs/screenshot.png` and uncomment below  
-> `![LocalMind UI](docs/screenshot.png)`
-
----
-
 ## ✨ Features
 
 ### 🧠 Multi-provider AI
